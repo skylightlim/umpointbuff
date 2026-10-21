@@ -1,2 +1,0 @@
-expo.modules.umpointsniper
-drawable umpoint_sniper_icon
