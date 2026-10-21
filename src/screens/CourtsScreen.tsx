@@ -1,926 +1,599 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import { Sniper } from '../../modules/umpoint-sniper';
+import { COURT_IDS, bookCourt, getWeek, scheduleSnipe } from '../services/api';
+import { BookingPrefs, DEFAULT_PREFS, loadPrefs, useCached } from '../services/cache';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-  TextInput,
-  Modal,
-  Switch,
-} from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { bookCourt, getGrid, scheduleSnipe } from '../services/api';
-import { CLOSING_TIME, dateMs, dayLabel, isWeekday, minutes, mytDate, nextRolloverMs } from '../services/umpointClient';
-import { CourtId, GridResponse, WeekType } from '../types';
+  CLOSING_TIME,
+  dateMs,
+  dayLabel,
+  hhmm,
+  isWeekday,
+  minutes,
+  mytDate,
+  nextRolloverMs,
+  weekStartMs,
+} from '../services/umpointClient';
+import { CourtId, SlotStatus, WeekGrid, WeekType } from '../types';
+import { Button, Hairline, Press, Segmented, Sheet, SheetHandle, Txt } from '../ui';
+import { CourtMarks, CourtTile, ScreenHeader, SessionPill, useToast } from '../components/Pieces';
+import { radius, space, useColors } from '../theme';
 
-interface Props {
-  onNavigateToSniper?: () => void;
-  onNavigateToBookings?: () => void;
-}
+const DAY = 86_400_000;
 
 /** For the 26 Oct 2026 study: snipes also record how fast courts go until 01:00. */
 const RECORD_ROLLOVER = true;
 
-const DURATIONS = [
-  { label: '30 min', dur: 1 },
-  { label: '1 hour', dur: 2 },
-  { label: '1.5 hrs', dur: 3 },
-  { label: '2 hours', dur: 4 },
-];
+interface Props {
+  week: WeekType;
+  onWeekChange: (w: WeekType) => void;
+  onOpenSettings: () => void;
+  onOpenSniper: () => void;
+}
 
-export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateToBookings }) => {
-  const [selectedWeek, setSelectedWeek] = useState<WeekType>('this');
-  const [selectedCourt, setSelectedCourt] = useState<CourtId>('1');
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [gridData, setGridData] = useState<GridResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+function ago(at: number | null, now: number): string {
+  if (!at) return '';
+  const min = Math.round((now - at) / 60_000);
+  return min < 1 ? 'Updated just now' : min < 60 ? `Updated ${min} min ago` : `Updated ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
 
-  // Selection for booking / sniping
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
-  const [slotDuration, setSlotDuration] = useState<number>(2); // in 30-minute slots
-  const [eventTitle, setEventTitle] = useState<string>('Badminton practice');
-  const [pax, setPax] = useState<number>(4);
-  const [anyCourt, setAnyCourt] = useState<boolean>(true);
-  const [submitting, setSubmitting] = useState<boolean>(false);
-  const [modalVisible, setModalVisible] = useState<boolean>(false);
-
-  const [reloadKey, setReloadKey] = useState<number>(0);
+export const CourtsScreen: React.FC<Props> = ({ week, onWeekChange, onOpenSettings, onOpenSniper }) => {
+  const c = useColors();
+  const monday = weekStartMs() + (week === 'next' ? 7 * DAY : 0);
+  const grid = useCached<WeekGrid>(`week:${mytDate(monday)}`, () => getWeek(week));
+  const [showEarlier, setShowEarlier] = useState(false);
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const [slot, setSlot] = useState<{ date: string; start: string } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const sheet = useRef<SheetHandle>(null);
 
   useEffect(() => {
-    let current = true;
-    getGrid(selectedCourt, selectedWeek)
-      .then(
-        (grid) => {
-          if (!current) return;
-          setGridData(grid);
-          setError(null);
-        },
-        (err: any) => current && setError(err?.message || 'Could not load the court schedule.'),
-      )
-      .finally(() => current && setLoading(false));
-    return () => {
-      current = false;
-    };
-  }, [selectedCourt, selectedWeek, reloadKey]);
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
-  const refresh = () => {
-    setLoading(true);
-    setReloadKey((k) => k + 1);
+  // Bookable: a weekday at least a day ahead. Next week opens at its Monday 00:00, which makes
+  // that Monday same-day — so Tue–Fri there.
+  const today = mytDate(now);
+  const earliest = (week === 'this' ? dateMs(today) : nextRolloverMs(now)) + DAY;
+  const bookable = (d: string) => dateMs(d) >= earliest;
+  const weekdays = (grid.data?.dates ?? []).filter(isWeekday);
+  const days = weekdays.filter((d) => showEarlier || bookable(d));
+  const hiddenEarlier = weekdays.filter((d) => !bookable(d)).length;
+  const date = pickedDate && days.includes(pickedDate) ? pickedDate : (days.find(bookable) ?? days[0]);
+  const readOnly = !date || !bookable(date);
+
+  const open = (start: string) => {
+    if (!date || readOnly) return;
+    setSlot({ date, start });
+    sheet.current?.open();
   };
 
-  const pickWeek = (week: WeekType) => {
-    if (week === selectedWeek) return;
-    setLoading(true);
-    setSelectedWeek(week);
-    setSelectedDate(null);
-  };
-
-  const pickCourt = (court: CourtId) => {
-    if (court === selectedCourt) return;
-    setLoading(true);
-    setSelectedCourt(court);
-  };
-
-  // Only days UMPoint will still take: weekdays (weekends are closed), booked at least a day
-  // ahead. Next week opens at its Monday 00:00, which makes that Monday same-day — so Tue–Fri.
-  const today = mytDate();
-  const dates = gridData?.dates || [];
-  const earliest = (selectedWeek === 'this' ? dateMs(today) : nextRolloverMs()) + 86_400_000;
-  const days = dates.filter((d) => isWeekday(d) && dateMs(d) >= earliest);
-  const currentDateStr = selectedDate && days.includes(selectedDate) ? selectedDate : days[0] || '';
-  const column = dates.indexOf(currentDateStr);
-
-  // The 19:00 row UMPoint draws can't be booked: courts close at 19:00.
-  const daySlots = (gridData?.slots ?? [])
-    .filter((slot) => minutes(slot.time_start) < minutes(CLOSING_TIME))
-    .map((slot, index) => {
-      const cell = slot.cells[column];
-      return {
-        index,
-        time_start: slot.time_start,
-        time_end: slot.time_end,
-        status: cell?.status || 'unavailable',
-      };
-    });
-
-  const selectedRange = (() => {
-    if (selectedSlotIndex === null || !daySlots[selectedSlotIndex]) return null;
-    const endIndex = selectedSlotIndex + slotDuration - 1;
-    if (endIndex >= daySlots.length) return null;
-    const span = daySlots.slice(selectedSlotIndex, endIndex + 1);
-    return {
-      start: span[0].time_start,
-      end: span[span.length - 1].time_end,
-      // A snipe targets next week, where every slot looks free until someone takes it at 00:00.
-      isValid: span.every((s) => s.status === 'free'),
-    };
-  })();
-
-  const handleSelectSlot = (idx: number) => {
-    const slot = daySlots[idx];
-    if (slot.status !== 'free') {
-      const what = slot.status === 'mine' ? 'already yours' : slot.status === 'closed' ? 'closed' : 'taken';
-      Alert.alert('Slot not free', `This slot is ${what}. Pick a green one.`);
-      return;
-    }
-    setSelectedSlotIndex(idx);
-    setModalVisible(true);
-  };
-
-  const handleBookNow = async () => {
-    if (!selectedRange) return;
-    setSubmitting(true);
-    try {
-      const res = await bookCourt({
-        date: currentDateStr,
-        start: selectedRange.start,
-        end: selectedRange.end,
-        court: selectedCourt,
-        anyCourt: false,
-        event: eventTitle,
-        pax,
-      });
-      if (res.status === 'booked') {
-        setModalVisible(false);
-        refresh();
-        Alert.alert('Court booked', res.message, [
-          { text: 'View Bookings', onPress: () => onNavigateToBookings && onNavigateToBookings() },
-          { text: 'OK' },
-        ]);
-      } else {
-        Alert.alert('Not booked', res.message);
-      }
-    } catch (err: any) {
-      Alert.alert('Booking failed', err?.message || 'Something went wrong.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleScheduleSnipe = () => {
-    if (!selectedRange) return;
-    try {
-      const task = scheduleSnipe({
-        date: currentDateStr,
-        start: selectedRange.start,
-        end: selectedRange.end,
-        court: selectedCourt,
-        anyCourt,
-        event: eventTitle,
-        pax,
-        measure: RECORD_ROLLOVER,
-      });
-      setModalVisible(false);
-      Alert.alert(
-        'Sniper armed',
-        `It fires at 00:00:00 MYT on ${dayLabel(mytDate(task.fireAt))}.\n\n` +
-          `${currentDateStr} ${selectedRange.start}–${selectedRange.end}, Court ${selectedCourt}${anyCourt ? ' (or any free court)' : ''}.\n\n` +
-          'Leave the phone on the charger. If your session has expired at 23:50 and the app can’t renew it, the phone will ring.',
-        [
-          { text: 'View Sniper', onPress: () => onNavigateToSniper && onNavigateToSniper() },
-          { text: 'OK' },
-        ],
-      );
-    } catch (err: any) {
-      Alert.alert('Could not arm the sniper', err?.message || 'Something went wrong.');
-    }
-  };
+  const statusLine = grid.refreshing
+    ? 'Updating…'
+    : grid.error
+      ? `Couldn’t refresh: ${grid.error}`
+      : ago(grid.updatedAt, now);
 
   return (
-    <View style={styles.container}>
-      {/* Week Selector */}
-      <View style={styles.weekToggleContainer}>
-        <TouchableOpacity
-          style={[styles.weekToggleButton, selectedWeek === 'this' && styles.weekToggleActive]}
-          onPress={() => pickWeek('this')}
-        >
-          <Text style={[styles.weekToggleText, selectedWeek === 'this' && styles.weekToggleTextActive]}>
-            This Week (Current)
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.weekToggleButton, selectedWeek === 'next' && styles.weekToggleActive]}
-          onPress={() => pickWeek('next')}
-        >
-          <View style={styles.rowCenter}>
-            <Text style={[styles.weekToggleText, selectedWeek === 'next' && styles.weekToggleTextActive]}>
-              Next Week
-            </Text>
-            <View style={styles.snipeBadge}>
-              <Text style={styles.snipeBadgeText}>SNIPER</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
+    <View style={[styles.flex, { backgroundColor: c.bg }]}>
+      <ScreenHeader title="Courts" right={<SessionPill onOpenSettings={onOpenSettings} />} />
+
+      <View style={styles.pad}>
+        <Segmented
+          options={[
+            { value: 'this', label: 'This week' },
+            { value: 'next', label: 'Next week', badge: 'SNIPE' },
+          ]}
+          value={week}
+          onChange={(w) => {
+            setPickedDate(null);
+            onWeekChange(w);
+          }}
+        />
       </View>
 
-      {/* Courts Chips */}
-      <View style={styles.courtChipsContainer}>
-        {(['1', '2', '3', '4'] as CourtId[]).map((c) => {
-          const isSelected = selectedCourt === c;
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.days}
+        style={styles.daysScroll}
+      >
+        {hiddenEarlier > 0 && week === 'this' ? (
+          <Press
+            onPress={() => setShowEarlier((v) => !v)}
+            haptic="selection"
+            style={[styles.dayChip, styles.earlier, { borderColor: c.hairline }]}
+            accessibilityLabel={showEarlier ? 'Hide earlier days' : 'Show earlier days'}
+          >
+            <Ionicons name={showEarlier ? 'eye-off-outline' : 'time-outline'} size={16} color={c.ink2} />
+            <Txt variant="footnote" color={c.ink2}>
+              {showEarlier ? 'Hide' : 'Earlier'}
+            </Txt>
+          </Press>
+        ) : null}
+        {days.map((d) => {
+          const selected = d === date;
+          const past = !bookable(d);
+          const [dd] = d.split('-');
           return (
-            <TouchableOpacity
-              key={c}
-              style={[styles.courtChip, isSelected && styles.courtChipActive]}
-              onPress={() => pickCourt(c)}
+            <Press
+              key={d}
+              onPress={() => setPickedDate(d)}
+              haptic="selection"
+              style={[
+                styles.dayChip,
+                { backgroundColor: selected ? c.ink : c.surface, opacity: past && !selected ? 0.6 : 1 },
+              ]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              accessibilityLabel={`${dayLabel(d)}${past ? ', past' : ''}`}
             >
-              <MaterialCommunityIcons
-                name="badminton"
-                size={18}
-                color={isSelected ? '#ffffff' : '#94a3b8'}
-              />
-              <Text style={[styles.courtChipText, isSelected && styles.courtChipTextActive]}>
-                Court {c}
-              </Text>
-            </TouchableOpacity>
+              <Txt variant="caption" color={selected ? c.surface : c.ink3}>
+                {d === today ? 'Today' : past ? 'Past' : dayLabel(d).split(' ')[0]}
+              </Txt>
+              <Txt variant="time" color={selected ? c.surface : c.ink}>
+                {dd}
+              </Txt>
+            </Press>
           );
         })}
+      </ScrollView>
+
+      <View style={[styles.pad, styles.statusRow]}>
+        <Txt variant="footnote" color={grid.error ? c.smash : c.ink3} numberOfLines={1} style={styles.flex}>
+          {statusLine}
+        </Txt>
+        {week === 'next' ? (
+          <Txt variant="footnote" color={c.smash}>
+            Opens Mon {dayLabel(mytDate(nextRolloverMs(now))).split(' ').slice(1).join(' ')} 00:00
+          </Txt>
+        ) : null}
       </View>
 
-      {/* Day Selector Tabs */}
-      <View style={styles.daysScrollContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysScroll}>
-          {days.map((dateStr) => {
-            const isSelected = currentDateStr === dateStr;
-            const [dayNum, monthNum] = dateStr.split('-');
-
-            return (
-              <TouchableOpacity
-                key={dateStr}
-                style={[styles.dayTab, isSelected && styles.dayTabActive]}
-                onPress={() => {
-                  setSelectedDate(dateStr);
-                  setSelectedSlotIndex(null);
-                }}
-              >
-                <Text style={[styles.dayTabLabel, isSelected && styles.dayTabLabelActive]}>
-                  {dayLabel(dateStr).split(' ')[0]}
-                </Text>
-                <Text style={[styles.dayTabDate, isSelected && styles.dayTabDateActive]}>
-                  {dayNum}/{monthNum}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {/* Grid Content */}
-      {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#10b981" />
-          <Text style={styles.loadingText}>Loading live court availability...</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.centerContainer}>
-          <Ionicons name="cloud-offline-outline" size={48} color="#334155" />
-          <Text style={styles.loadingText}>{error}</Text>
-          <TouchableOpacity onPress={refresh} style={styles.retryBtn}>
-            <Text style={styles.retryText}>Try again</Text>
-          </TouchableOpacity>
-        </View>
-      ) : gridData && days.length === 0 ? (
-        <View style={styles.centerContainer}>
-          <Ionicons name="calendar-outline" size={48} color="#334155" />
-          <Text style={styles.loadingText}>Nothing left to book this week (book at least a day ahead).</Text>
-          <TouchableOpacity onPress={() => pickWeek('next')} style={styles.retryBtn}>
-            <Text style={styles.retryText}>See next week</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView style={styles.slotList} contentContainerStyle={styles.slotListContent}>
-          <View style={styles.slotListHeader}>
-            <Text style={styles.slotListTitle}>
-              Court {selectedCourt} • {currentDateStr ? dayLabel(currentDateStr) : ''}
-            </Text>
-            <TouchableOpacity onPress={refresh} accessibilityLabel="Refresh">
-              <Ionicons name="refresh" size={18} color="#10b981" />
-            </TouchableOpacity>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.rail}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={grid.refresh} tintColor={c.mat} colors={[c.mat]} />}
+      >
+        {!grid.data ? (
+          grid.error ? (
+            <View style={styles.empty}>
+              <Ionicons name="cloud-offline-outline" size={40} color={c.ink3} />
+              <Txt variant="headline" style={{ marginTop: space.m }}>
+                Can’t load the courts
+              </Txt>
+              <Txt variant="footnote" color={c.ink2} style={{ textAlign: 'center', marginTop: 4 }}>
+                {grid.error}
+              </Txt>
+              <Button label="Try again" tone="plain" onPress={grid.refresh} style={{ marginTop: space.l, alignSelf: 'stretch' }} />
+            </View>
+          ) : (
+            <RailSkeleton />
+          )
+        ) : days.length === 0 ? (
+          <View style={styles.empty}>
+            <Ionicons name="calendar-outline" size={40} color={c.ink3} />
+            <Txt variant="headline" style={{ marginTop: space.m }}>
+              Nothing left to book this week
+            </Txt>
+            <Txt variant="footnote" color={c.ink2} style={{ textAlign: 'center', marginTop: 4 }}>
+              Courts are booked at least a day ahead.
+            </Txt>
+            <Button label="See next week" tone="plain" onPress={() => onWeekChange('next')} style={{ marginTop: space.l, alignSelf: 'stretch' }} />
           </View>
-
-          {daySlots.map((slot) => {
-            const isFree = slot.status === 'free';
-            const isPending = slot.status === 'mine';
-            const isBooked = slot.status === 'taken';
-            const isClosed = slot.status === 'closed' || slot.status === 'unavailable';
-
-            return (
-              <TouchableOpacity
-                key={slot.time_start}
-                style={[
-                  styles.slotRow,
-                  isFree && styles.slotRowFree,
-                  isPending && styles.slotRowPending,
-                  isBooked && styles.slotRowBooked,
-                  isClosed && styles.slotRowClosed,
-                ]}
-                onPress={() => handleSelectSlot(slot.index)}
-                activeOpacity={isFree ? 0.7 : 0.9}
-              >
-                <View style={styles.timeContainer}>
-                  <Text style={styles.timeStart}>{slot.time_start}</Text>
-                  <Text style={styles.timeEnd}>to {slot.time_end}</Text>
-                </View>
-
-                <View style={styles.statusBadgeContainer}>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      isFree && styles.statusPillFree,
-                      isPending && styles.statusPillPending,
-                      isBooked && styles.statusPillBooked,
-                      isClosed && styles.statusPillClosed,
-                    ]}
+        ) : (
+          <View style={[styles.railCard, { backgroundColor: c.surface }]}>
+            {readOnly ? (
+              <View style={[styles.readOnlyNote, { backgroundColor: c.fill }]}>
+                <Ionicons name="lock-closed-outline" size={14} color={c.ink2} />
+                <Txt variant="footnote" color={c.ink2}>
+                  {date === today ? 'Today can’t be booked any more — book a day ahead.' : 'This day has passed.'}
+                </Txt>
+              </View>
+            ) : null}
+            {grid.data.times.map((t, i) => {
+              const statuses = COURT_IDS.map((id) => grid.data!.status[date!]?.[t.start]?.[id] ?? 'unavailable');
+              const free = statuses.filter((s) => s === 'free').length;
+              const mine = statuses.includes('mine');
+              const canOpen = !readOnly && free > 0;
+              return (
+                <View key={t.start}>
+                  {i > 0 ? <Hairline inset={space.l} /> : null}
+                  <Press
+                    onPress={() => open(t.start)}
+                    disabled={!canOpen}
+                    style={[styles.row, { opacity: readOnly ? 0.55 : 1 }]}
+                    accessibilityLabel={`${t.start}, ${mine ? 'yours' : free === 0 ? 'full' : `${free} courts free`}`}
                   >
-                    <Text
-                      style={[
-                        styles.statusPillText,
-                        isFree && styles.statusPillTextFree,
-                        isPending && styles.statusPillTextPending,
-                        isBooked && styles.statusPillTextBooked,
-                      ]}
+                    <Txt variant="time" style={styles.rowTime} color={free === 0 && !mine ? c.ink3 : c.ink}>
+                      {t.start}
+                    </Txt>
+                    <CourtMarks statuses={statuses} />
+                    <Txt
+                      variant="footnote"
+                      color={mine ? c.cork : free === 0 ? c.ink3 : c.mat}
+                      style={[styles.rowLabel, { fontWeight: '600' }]}
                     >
-                      {slot.status === 'mine' ? 'YOURS' : slot.status === 'unavailable' ? 'CLOSED' : slot.status.toUpperCase()}
-                    </Text>
-                  </View>
+                      {mine ? 'Yours' : free === 0 ? 'Full' : `${free} free`}
+                    </Txt>
+                    <Ionicons name="chevron-forward" size={16} color={canOpen ? c.ink3 : 'transparent'} />
+                  </Press>
                 </View>
-
-                {isFree ? (
-                  <View style={styles.bookActionIcon}>
-                    <Text style={styles.selectText}>Select</Text>
-                    <Ionicons name="chevron-forward" size={16} color="#10b981" />
-                  </View>
-                ) : (
-                  <View style={styles.bookActionIcon}>
-                    <Ionicons
-                      name={isPending ? 'person-circle-outline' : isBooked ? 'lock-closed-outline' : 'close-circle-outline'}
-                      size={18}
-                      color="#64748b"
-                    />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      )}
-
-      {/* Booking Drawer Modal */}
-      <Modal visible={modalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>
-                  {selectedWeek === 'this' ? 'Book Court' : 'Arm the Monday 00:00 sniper'}
-                </Text>
-                <Text style={styles.modalSubtitle}>
-                  Court {selectedCourt} • {currentDateStr ? dayLabel(currentDateStr) : ''}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseBtn}>
-                <Ionicons name="close" size={24} color="#94a3b8" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Time Span Picker */}
-            <View style={styles.modalSection}>
-              <Text style={styles.inputLabel}>Duration</Text>
-              <View style={styles.durationRow}>
-                {DURATIONS.map((item) => {
-                  const fits = selectedSlotIndex !== null && selectedSlotIndex + item.dur <= daySlots.length;
-                  return (
-                  <TouchableOpacity
-                    key={item.dur}
-                    style={[
-                      styles.durationChip,
-                      slotDuration === item.dur && styles.durationChipActive,
-                      !fits && styles.durationChipDisabled,
-                    ]}
-                    onPress={() => fits && setSlotDuration(item.dur)}
-                    disabled={!fits}
-                  >
-                    <Text style={[styles.durationChipText, slotDuration === item.dur && styles.durationChipTextActive]}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Selected Range Display */}
-            {!selectedRange && (
-              <Text style={styles.invalidRangeWarn}>Courts close at 19:00 — pick a shorter time.</Text>
-            )}
-            {selectedRange && (
-              <View style={styles.selectedTimeBox}>
-                <Ionicons name="time-outline" size={20} color="#10b981" />
-                <Text style={styles.selectedTimeText}>
-                  {selectedRange.start} – {selectedRange.end}
-                </Text>
-                {!selectedRange.isValid && (
-                  <Text style={styles.invalidRangeWarn}>Part of this time is already taken</Text>
-                )}
-              </View>
-            )}
-
-            {/* Pax Selector */}
-            <View style={styles.modalSection}>
-              <Text style={styles.inputLabel}>Participants (Pax: Max 4)</Text>
-              <View style={styles.paxRow}>
-                {[1, 2, 3, 4].map((n) => (
-                  <TouchableOpacity
-                    key={n}
-                    style={[styles.paxBtn, pax === n && styles.paxBtnActive]}
-                    onPress={() => setPax(n)}
-                  >
-                    <Text style={[styles.paxBtnText, pax === n && styles.paxBtnTextActive]}>{n}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Event Name */}
-            <View style={styles.modalSection}>
-              <Text style={styles.inputLabel}>Event / Booking Purpose</Text>
-              <TextInput
-                style={styles.textInput}
-                value={eventTitle}
-                onChangeText={setEventTitle}
-                placeholder="Badminton practice"
-                placeholderTextColor="#64748b"
-              />
-            </View>
-
-            {selectedWeek === 'next' && (
-              <View style={styles.anyCourtRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.anyCourtTitle}>Any court</Text>
-                  <Text style={styles.anyCourtText}>
-                    If Court {selectedCourt} is gone at 00:00, try the other courts one at a time. You never get more than one.
-                  </Text>
-                </View>
-                <Switch value={anyCourt} onValueChange={setAnyCourt} trackColor={{ true: '#ef4444' }} />
-              </View>
-            )}
-
-            {/* Action Buttons */}
-            {selectedWeek === 'this' ? (
-              <TouchableOpacity
-                style={[styles.submitButton, (!selectedRange?.isValid || submitting) && styles.submitButtonDisabled]}
-                onPress={handleBookNow}
-                disabled={!selectedRange?.isValid || submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark-circle-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-                    <Text style={styles.submitButtonText}>Confirm & Book Now</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[styles.snipeButton, (!selectedRange?.isValid || submitting) && styles.submitButtonDisabled]}
-                onPress={handleScheduleSnipe}
-                disabled={!selectedRange?.isValid || submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <>
-                    <MaterialCommunityIcons name="target" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-                    <Text style={styles.submitButtonText}>Arm for Mon 00:00:00</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
+              );
+            })}
           </View>
-        </View>
-      </Modal>
+        )}
+      </ScrollView>
+
+      <Sheet ref={sheet} onClosed={() => setSlot(null)}>
+        {slot && grid.data ? (
+          <SlotSheet
+            grid={grid.data}
+            week={week}
+            date={slot.date}
+            start={slot.start}
+            onDone={(changed) => {
+              sheet.current?.close();
+              if (changed) grid.refresh();
+            }}
+            onOpenSettings={() => {
+              sheet.current?.close();
+              onOpenSettings();
+            }}
+            onOpenSniper={() => {
+              sheet.current?.close();
+              onOpenSniper();
+            }}
+          />
+        ) : null}
+      </Sheet>
     </View>
   );
 };
 
+function RailSkeleton() {
+  const c = useColors();
+  return (
+    <View style={[styles.railCard, { backgroundColor: c.surface }]}>
+      {Array.from({ length: 8 }, (_, i) => (
+        <View key={i} style={styles.row}>
+          <View style={[styles.skel, { width: 54, backgroundColor: c.fill }]} />
+          <View style={[styles.skel, { width: 52, backgroundColor: c.fill }]} />
+          <View style={[styles.skel, { width: 44, marginLeft: 'auto', backgroundColor: c.fill }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const DURATIONS = [
+  { slots: 1, label: '30 min' },
+  { slots: 2, label: '1 hr' },
+  { slots: 3, label: '1½ hr' },
+  { slots: 4, label: '2 hr' },
+];
+
+function SlotSheet({
+  grid,
+  week,
+  date,
+  start,
+  onDone,
+  onOpenSettings,
+  onOpenSniper,
+}: {
+  grid: WeekGrid;
+  week: WeekType;
+  date: string;
+  start: string;
+  onDone: (changed: boolean) => void;
+  onOpenSettings: () => void;
+  onOpenSniper: () => void;
+}) {
+  const c = useColors();
+  const toast = useToast();
+  const [slots, setSlots] = useState(2);
+  const [court, setCourt] = useState<CourtId | null>(null);
+  const [anyCourt, setAnyCourt] = useState(true);
+  const [prefs, setPrefs] = useState<BookingPrefs>(DEFAULT_PREFS);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadPrefs().then(setPrefs);
+  }, []);
+
+  const fits = (n: number) => minutes(start) + n * 30 <= minutes(CLOSING_TIME);
+  const length = fits(slots) ? slots : DURATIONS.filter((d) => fits(d.slots)).pop()?.slots ?? 1;
+  const end = hhmm(minutes(start) + length * 30);
+  const starts = Array.from({ length }, (_, i) => hhmm(minutes(start) + i * 30));
+
+  // A court is free for the booking only if every half hour in it is free.
+  const rangeStatus = (id: CourtId): SlotStatus => {
+    const all = starts.map((s) => grid.status[date]?.[s]?.[id] ?? 'unavailable');
+    if (all.every((s) => s === 'free')) return 'free';
+    return all.includes('mine') ? 'mine' : 'taken';
+  };
+  const freeCourts = COURT_IDS.filter((id) => rangeStatus(id) === 'free');
+  const chosen = court && freeCourts.includes(court) ? court : (freeCourts[0] ?? null);
+
+  // Pusat Sukan's terms: one session a day, two bookings a week on different days.
+  const sniping = week === 'next';
+  const armed = sniping ? Sniper.tasks().filter((t) => t.status === 'armed' && grid.dates.includes(t.date)) : [];
+  const mineDays = sniping
+    ? [...new Set(armed.map((t) => t.date))]
+    : grid.dates.filter((d) => Object.values(grid.status[d] ?? {}).some((byCourt) => Object.values(byCourt).includes('mine')));
+  const warning = mineDays.includes(date)
+    ? `You already have ${sniping ? 'a snipe armed' : 'a session'} on ${dayLabel(date)}. Pusat Sukan allows one session a day.`
+    : mineDays.length >= 2
+      ? `You already have two ${sniping ? 'snipes armed' : 'bookings'} that week. Pusat Sukan allows two a week.`
+      : null;
+
+  const book = async () => {
+    if (!chosen) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      const res = await bookCourt({ date, start, end, court: chosen, anyCourt: false, event: prefs.event, pax: prefs.pax });
+      if (res.status === 'booked') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        toast(res.message);
+        onDone(true);
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setProblem(res.message);
+      }
+    } catch (e: any) {
+      setProblem(e?.message || 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const arm = () => {
+    if (!chosen) return;
+    try {
+      scheduleSnipe({ date, start, end, court: chosen, anyCourt, event: prefs.event, pax: prefs.pax, measure: RECORD_ROLLOVER });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      toast(`Sniper armed · ${dayLabel(date)} ${start}–${end}, Court ${chosen}`, 'smash');
+      onDone(false);
+    } catch (e: any) {
+      setProblem(e?.message || 'Couldn’t arm the sniper.');
+    }
+  };
+
+  return (
+    <View>
+      <Txt variant="caption" color={c.ink3}>
+        {dayLabel(date)}
+      </Txt>
+      <View style={styles.sheetTitle}>
+        <Txt variant="clock" style={{ fontSize: 44, lineHeight: 48 }}>
+          {start}
+        </Txt>
+        <Txt variant="time" color={c.ink3} style={{ marginBottom: 4 }}>
+          – {end}
+        </Txt>
+      </View>
+
+      <View style={styles.durations}>
+        {DURATIONS.map((d) => {
+          const ok = fits(d.slots);
+          const selected = d.slots === length;
+          return (
+            <Press
+              key={d.slots}
+              onPress={() => setSlots(d.slots)}
+              disabled={!ok}
+              haptic="selection"
+              style={[
+                styles.duration,
+                { backgroundColor: selected ? c.ink : c.fill, opacity: ok ? 1 : 0.35 },
+              ]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected, disabled: !ok }}
+            >
+              <Txt variant="callout" color={selected ? c.surface : c.ink}>
+                {d.label}
+              </Txt>
+            </Press>
+          );
+        })}
+      </View>
+
+      <View style={styles.courts}>
+        {COURT_IDS.map((id) => (
+          <CourtTile
+            key={id}
+            label={`Court ${id}`}
+            status={rangeStatus(id)}
+            selected={id === chosen}
+            onPress={() => setCourt(id)}
+          />
+        ))}
+      </View>
+
+      {sniping ? (
+        <View style={[styles.optionRow, { backgroundColor: c.fill }]}>
+          <View style={styles.flex}>
+            <Txt variant="headline">Any court</Txt>
+            <Txt variant="footnote" color={c.ink2}>
+              If Court {chosen ?? '–'} is gone at 00:00, try the others one at a time. Never more than one.
+            </Txt>
+          </View>
+          <Switch value={anyCourt} onValueChange={setAnyCourt} trackColor={{ true: c.smash }} />
+        </View>
+      ) : null}
+
+      {warning ? (
+        <View style={[styles.note, { backgroundColor: c.corkSoft }]}>
+          <Ionicons name="information-circle" size={16} color={c.cork} />
+          <Txt variant="footnote" color={c.ink} style={styles.flex}>
+            {warning}
+          </Txt>
+        </View>
+      ) : null}
+      {problem ? (
+        <View style={[styles.note, { backgroundColor: c.smashSoft }]}>
+          <Ionicons name="alert-circle" size={16} color={c.smash} />
+          <Txt variant="footnote" color={c.ink} style={styles.flex}>
+            {problem}
+          </Txt>
+        </View>
+      ) : null}
+
+      {chosen ? (
+        sniping ? (
+          <Button
+            tone="smash"
+            icon="locate"
+            label={`Arm sniper · Court ${chosen}`}
+            onPress={arm}
+            style={{ marginTop: space.l }}
+          />
+        ) : (
+          <Button
+            label={`Book Court ${chosen} · ${start}–${end}`}
+            onPress={book}
+            loading={busy}
+            style={{ marginTop: space.l }}
+          />
+        )
+      ) : (
+        <Button label="No court is free for that long" onPress={() => {}} disabled tone="plain" style={{ marginTop: space.l }} />
+      )}
+
+      <Press onPress={onOpenSettings} style={styles.prefsLink} accessibilityRole="button">
+        <Txt variant="footnote" color={c.ink3}>
+          As “{prefs.event}”, {prefs.pax} players · Change
+        </Txt>
+      </Press>
+      {sniping ? (
+        <Press onPress={onOpenSniper} style={styles.prefsLink}>
+          <Txt variant="footnote" color={c.ink3}>
+            Fires Monday 00:00:00 · How the sniper works
+          </Txt>
+        </Press>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  retryBtn: {
-    marginTop: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#131b2e',
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  retryText: {
-    color: '#10b981',
-    fontWeight: '700',
-  },
-  durationChipDisabled: {
-    opacity: 0.35,
-  },
-  anyCourtRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    marginBottom: 14,
-    borderRadius: 12,
-    backgroundColor: '#0f172a',
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  anyCourtTitle: {
-    color: '#f8fafc',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  anyCourtText: {
-    color: '#94a3b8',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 2,
-  },
-  container: {
+  flex: {
     flex: 1,
-    backgroundColor: '#090d16',
   },
-  weekToggleContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: '#131b2e',
-    borderRadius: 12,
-    padding: 4,
-  },
-  weekToggleButton: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  weekToggleActive: {
-    backgroundColor: '#1e293b',
-  },
-  weekToggleText: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  weekToggleTextActive: {
-    color: '#f8fafc',
-  },
-  rowCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  snipeBadge: {
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginLeft: 6,
-  },
-  snipeBadgeText: {
-    color: '#ffffff',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  courtChipsContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginTop: 12,
-    gap: 8,
-  },
-  courtChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    backgroundColor: '#131b2e',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-    gap: 6,
-  },
-  courtChipActive: {
-    backgroundColor: '#065f46',
-    borderColor: '#10b981',
-  },
-  courtChipText: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  courtChipTextActive: {
-    color: '#ffffff',
-  },
-  daysScrollContainer: {
-    marginTop: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    paddingBottom: 10,
+  pad: {
+    paddingHorizontal: space.l,
   },
   daysScroll: {
-    paddingHorizontal: 16,
-    gap: 10,
+    flexGrow: 0,
+    marginTop: space.m,
   },
-  dayTab: {
+  days: {
+    paddingHorizontal: space.l,
+    gap: space.s,
+  },
+  dayChip: {
+    width: 58,
+    height: 62,
+    borderRadius: radius.m,
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: '#131b2e',
-    minWidth: 64,
+    justifyContent: 'center',
+    gap: 2,
   },
-  dayTabActive: {
-    backgroundColor: '#2563eb',
+  earlier: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
   },
-  dayTabLabel: {
-    color: '#94a3b8',
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s,
+    marginTop: space.m,
+    marginBottom: space.s,
   },
-  dayTabLabelActive: {
-    color: '#ffffff',
+  rail: {
+    paddingHorizontal: space.l,
+    paddingBottom: space.xxl,
   },
-  dayTabDate: {
-    color: '#f8fafc',
-    fontSize: 14,
-    fontWeight: '700',
+  railCard: {
+    borderRadius: radius.l,
+    overflow: 'hidden',
+  },
+  readOnlyNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s,
+    paddingHorizontal: space.l,
+    paddingVertical: space.s,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.l,
+    paddingHorizontal: space.l,
+    minHeight: 52,
+  },
+  rowTime: {
+    width: 54,
+  },
+  rowLabel: {
+    flex: 1,
+    textAlign: 'right',
+  },
+  skel: {
+    height: 14,
+    borderRadius: 7,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: space.xxl,
+    paddingHorizontal: space.xl,
+  },
+  sheetTitle: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: space.s,
     marginTop: 2,
   },
-  dayTabDateActive: {
-    color: '#ffffff',
+  durations: {
+    flexDirection: 'row',
+    gap: space.s,
+    marginTop: space.l,
   },
-  centerContainer: {
+  duration: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#94a3b8',
-    marginTop: 12,
-    fontSize: 14,
-  },
-  slotList: {
-    flex: 1,
-  },
-  slotListContent: {
-    padding: 16,
-    paddingBottom: 40,
-    gap: 10,
-  },
-  slotListHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  slotListTitle: {
-    color: '#cbd5e1',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  slotRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#131b2e',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  slotRowFree: {
-    borderColor: '#064e3b',
-    backgroundColor: '#09251e',
-  },
-  slotRowPending: {
-    borderColor: '#78350f',
-    backgroundColor: '#241b09',
-  },
-  slotRowBooked: {
-    borderColor: '#334155',
-    backgroundColor: '#0f172a',
-    opacity: 0.8,
-  },
-  slotRowClosed: {
-    borderColor: '#1e293b',
-    backgroundColor: '#0a0f1d',
-    opacity: 0.5,
-  },
-  timeContainer: {
-    width: 110,
-  },
-  timeStart: {
-    color: '#f8fafc',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  timeEnd: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  statusBadgeContainer: {
-    flex: 1,
-    alignItems: 'flex-start',
-  },
-  statusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: '#1e293b',
-  },
-  statusPillFree: {
-    backgroundColor: '#065f46',
-  },
-  statusPillPending: {
-    backgroundColor: '#854d0e',
-  },
-  statusPillBooked: {
-    backgroundColor: '#334155',
-  },
-  statusPillClosed: {
-    backgroundColor: '#1e293b',
-  },
-  statusPillText: {
-    color: '#94a3b8',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  statusPillTextFree: {
-    color: '#34d399',
-  },
-  statusPillTextPending: {
-    color: '#fef08a',
-  },
-  statusPillTextBooked: {
-    color: '#cbd5e1',
-  },
-  bookActionIcon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  selectText: {
-    color: '#10b981',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalCard: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
-    borderTopWidth: 1,
-    borderColor: '#1f2937',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    color: '#f9fafb',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  modalSubtitle: {
-    color: '#9ca3af',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  modalCloseBtn: {
-    padding: 4,
-  },
-  modalSection: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    color: '#9ca3af',
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  durationRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  durationChip: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-    backgroundColor: '#1f2937',
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  durationChipActive: {
-    backgroundColor: '#065f46',
-    borderColor: '#10b981',
-  },
-  durationChipText: {
-    color: '#9ca3af',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  durationChipTextActive: {
-    color: '#ffffff',
-  },
-  selectedTimeBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1f2937',
+    height: 38,
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-    gap: 10,
-  },
-  selectedTimeText: {
-    color: '#10b981',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  invalidRangeWarn: {
-    color: '#ef4444',
-    fontSize: 11,
-    marginLeft: 'auto',
-  },
-  paxRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  paxBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-    backgroundColor: '#1f2937',
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  paxBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#3b82f6',
-  },
-  paxBtnText: {
-    color: '#9ca3af',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  paxBtnTextActive: {
-    color: '#ffffff',
-  },
-  textInput: {
-    backgroundColor: '#1f2937',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#374151',
-    color: '#f9fafb',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-  },
-  submitButton: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#059669',
-    borderRadius: 12,
-    paddingVertical: 15,
-    marginTop: 10,
   },
-  snipeButton: {
+  courts: {
+    flexDirection: 'row',
+    gap: space.m,
+    marginTop: space.xl,
+  },
+  optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#dc2626',
-    borderRadius: 12,
-    paddingVertical: 15,
-    marginTop: 10,
+    gap: space.m,
+    padding: space.m,
+    borderRadius: radius.m,
+    marginTop: space.l,
   },
-  submitButtonDisabled: {
-    opacity: 0.5,
+  note: {
+    flexDirection: 'row',
+    gap: space.s,
+    padding: space.m,
+    borderRadius: radius.m,
+    marginTop: space.m,
   },
-  submitButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
+  prefsLink: {
+    alignItems: 'center',
+    paddingTop: space.m,
   },
 });

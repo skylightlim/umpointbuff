@@ -1,36 +1,59 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  AppState,
-  PermissionsAndroid,
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  SafeAreaView,
-  Platform,
-  StatusBar as RNStatusBar,
-} from 'react-native';
+import { AppState, PermissionsAndroid, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as SystemUI from 'expo-system-ui';
+import { useFonts } from 'expo-font';
+import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold } from '@expo-google-fonts/barlow-condensed';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { CourtsScreen } from './src/screens/CourtsScreen';
 import { BookingsScreen } from './src/screens/BookingsScreen';
 import { SniperScreen } from './src/screens/SniperScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { UmpointSheet } from './src/components/UmpointSheet';
+import { ToastProvider } from './src/components/Pieces';
 import { Sniper } from './modules/umpoint-sniper';
-import { onSignInRequest, refreshSession, requestSignIn, useSession } from './src/services/session';
+import { onSignInRequest, refreshSession, requestSignIn } from './src/services/session';
+import { Txt } from './src/ui';
+import { useColors } from './src/theme';
+import { WeekType } from './src/types';
 
 type Tab = 'courts' | 'sniper' | 'bookings' | 'settings';
 
+const TABS: { tab: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; active: keyof typeof Ionicons.glyphMap }[] = [
+  { tab: 'courts', label: 'Courts', icon: 'grid-outline', active: 'grid' },
+  { tab: 'sniper', label: 'Sniper', icon: 'locate-outline', active: 'locate' },
+  { tab: 'bookings', label: 'Bookings', icon: 'bookmark-outline', active: 'bookmark' },
+  { tab: 'settings', label: 'Settings', icon: 'settings-outline', active: 'settings' },
+];
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('courts');
+  const [fontsLoaded] = useFonts({ BarlowCondensed_600SemiBold, BarlowCondensed_700Bold });
+  return (
+    <GestureHandlerRootView style={styles.flex}>
+      <SafeAreaProvider>
+        <ToastProvider>{fontsLoaded ? <Shell /> : null}</ToastProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+function Shell() {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const [tab, setTab] = useState<Tab>('courts');
+  const [courtsWeek, setCourtsWeek] = useState<WeekType>('this');
   const [signIn, setSignIn] = useState<{ reason?: string } | null>(null);
   const signInOpen = useRef(false);
-  const session = useSession();
 
   useEffect(() => {
     signInOpen.current = signIn !== null;
   }, [signIn]);
+
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(c.bg);
+  }, [c.bg]);
 
   useEffect(() => {
     if (Platform.OS === 'android' && Number(Platform.Version) >= 33) {
@@ -54,113 +77,58 @@ export default function App() {
     };
   }, []);
 
-  const pill =
-    session === 'signed_in'
-      ? { text: 'SIGNED IN', color: '#10b981' }
-      : session === 'signed_out'
-        ? { text: 'SIGN IN', color: '#f59e0b' }
-        : session === 'offline'
-          ? { text: 'OFFLINE', color: '#94a3b8' }
-          : { text: 'CHECKING', color: '#94a3b8' };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-
-      {/* Main App Top Header */}
-      <View style={styles.appHeader}>
-        <View style={styles.brandRow}>
-          <View style={styles.brandLogoBox}>
-            <MaterialCommunityIcons name="badminton" size={20} color="#10b981" />
-          </View>
-          <View>
-            <Text style={styles.brandTitle}>UMPoint Badminton</Text>
-            <Text style={styles.brandSubtitle}>Pusat Sukan • Second College</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.serverStatusPill, { borderColor: pill.color, backgroundColor: pill.color + '1f' }]}
-          onPress={() => (session === 'signed_in' ? setActiveTab('settings') : requestSignIn())}
-          accessibilityLabel={`UMPoint session: ${pill.text.toLowerCase()}`}
-        >
-          <View style={[styles.greenDot, { backgroundColor: pill.color }]} />
-          <Text style={[styles.serverStatusText, { color: pill.color }]}>{pill.text}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Screen Body */}
-      <View style={styles.screenContainer}>
-        {activeTab === 'courts' && (
+    <View style={[styles.flex, { backgroundColor: c.bg, paddingTop: insets.top }]}>
+      <StatusBar style="auto" />
+      <View style={styles.flex}>
+        {tab === 'courts' && (
           <CourtsScreen
-            onNavigateToSniper={() => setActiveTab('sniper')}
-            onNavigateToBookings={() => setActiveTab('bookings')}
+            week={courtsWeek}
+            onWeekChange={setCourtsWeek}
+            onOpenSettings={() => setTab('settings')}
+            onOpenSniper={() => setTab('sniper')}
           />
         )}
-        {activeTab === 'sniper' && (
-          <SniperScreen onNavigateToCourts={() => setActiveTab('courts')} />
+        {tab === 'sniper' && (
+          <SniperScreen
+            onPickSlot={() => {
+              setCourtsWeek('next');
+              setTab('courts');
+            }}
+            onOpenSettings={() => setTab('settings')}
+          />
         )}
-        {activeTab === 'bookings' && <BookingsScreen />}
-        {activeTab === 'settings' && <SettingsScreen />}
+        {tab === 'bookings' && <BookingsScreen onOpenSettings={() => setTab('settings')} />}
+        {tab === 'settings' && <SettingsScreen />}
       </View>
 
-      {/* Bottom Navigation Bar */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={[styles.navItem, activeTab === 'courts' && styles.navItemActive]}
-          onPress={() => setActiveTab('courts')}
-        >
-          <MaterialCommunityIcons
-            name={activeTab === 'courts' ? 'calendar-month' : 'calendar-month-outline'}
-            size={24}
-            color={activeTab === 'courts' ? '#10b981' : '#64748b'}
-          />
-          <Text style={[styles.navText, activeTab === 'courts' && styles.navTextActive]}>
-            Courts
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.navItem, activeTab === 'sniper' && styles.navItemActive]}
-          onPress={() => setActiveTab('sniper')}
-        >
-          <MaterialCommunityIcons
-            name={activeTab === 'sniper' ? 'target' : 'target'}
-            size={24}
-            color={activeTab === 'sniper' ? '#ef4444' : '#64748b'}
-          />
-          <Text style={[styles.navText, activeTab === 'sniper' && styles.navTextSniperActive]}>
-            Sniper
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.navItem, activeTab === 'bookings' && styles.navItemActive]}
-          onPress={() => setActiveTab('bookings')}
-        >
-          <Ionicons
-            name={activeTab === 'bookings' ? 'bookmark' : 'bookmark-outline'}
-            size={22}
-            color={activeTab === 'bookings' ? '#38bdf8' : '#64748b'}
-          />
-          <Text style={[styles.navText, activeTab === 'bookings' && styles.navTextBookingsActive]}>
-            Bookings
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.navItem, activeTab === 'settings' && styles.navItemActive]}
-          onPress={() => setActiveTab('settings')}
-        >
-          <Ionicons
-            name={activeTab === 'settings' ? 'settings' : 'settings-outline'}
-            size={22}
-            color={activeTab === 'settings' ? '#f8fafc' : '#64748b'}
-          />
-          <Text style={[styles.navText, activeTab === 'settings' && styles.navTextSettingsActive]}>
-            Settings
-          </Text>
-        </TouchableOpacity>
+      {/* Tabs are peers: switching is instant, no slide. */}
+      <View
+        style={[
+          styles.tabBar,
+          { backgroundColor: c.surface, borderTopColor: c.hairline, paddingBottom: Math.max(insets.bottom, 8) },
+        ]}
+        accessibilityRole="tablist"
+      >
+        {TABS.map((t) => {
+          const active = t.tab === tab;
+          const color = active ? (t.tab === 'sniper' ? c.smash : c.mat) : c.ink3;
+          return (
+            <Pressable
+              key={t.tab}
+              style={styles.tabItem}
+              onPress={() => setTab(t.tab)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={t.label}
+            >
+              <Ionicons name={active ? t.active : t.icon} size={23} color={color} />
+              <Txt variant="caption" color={color} style={styles.tabLabel}>
+                {t.label}
+              </Txt>
+            </Pressable>
+          );
+        })}
       </View>
 
       <UmpointSheet
@@ -172,109 +140,28 @@ export default function App() {
           refreshSession();
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#090d16',
-    paddingTop: Platform.OS === 'android' ? RNStatusBar.currentHeight || 24 : 0,
-  },
-  appHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#131b2e',
-    backgroundColor: '#090d16',
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  brandLogoBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#064e3b',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  brandTitle: {
-    color: '#f8fafc',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  brandSubtitle: {
-    color: '#64748b',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  serverStatusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  greenDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10b981',
-  },
-  serverStatusText: {
-    color: '#10b981',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  screenContainer: {
+  flex: {
     flex: 1,
   },
-  bottomNav: {
+  tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#0c1220',
-    borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 6,
   },
-  navItem: {
+  tabItem: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 2,
     paddingVertical: 4,
   },
-  navItemActive: {},
-  navText: {
-    fontSize: 11,
+  tabLabel: {
+    textTransform: 'none',
+    letterSpacing: 0.1,
     fontWeight: '600',
-    color: '#64748b',
-    marginTop: 4,
-  },
-  navTextActive: {
-    color: '#10b981',
-    fontWeight: '700',
-  },
-  navTextSniperActive: {
-    color: '#ef4444',
-    fontWeight: '700',
-  },
-  navTextBookingsActive: {
-    color: '#38bdf8',
-    fontWeight: '700',
-  },
-  navTextSettingsActive: {
-    color: '#f8fafc',
-    fontWeight: '700',
   },
 });

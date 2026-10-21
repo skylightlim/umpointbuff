@@ -1,261 +1,181 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { getBookings } from '../services/api';
+import { useCached } from '../services/cache';
+import { Button, Card, Press, Txt } from '../ui';
+import { ScreenHeader, SessionPill } from '../components/Pieces';
 import { UmpointSheet } from '../components/UmpointSheet';
 import { Booking } from '../types';
+import { radius, space, useColors } from '../theme';
 
-export const BookingsScreen: React.FC = () => {
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [dashboardOpen, setDashboardOpen] = useState<boolean>(false);
-
-  const [reloadKey, setReloadKey] = useState<number>(0);
-
-  useEffect(() => {
-    let current = true;
-    getBookings()
-      .then(
-        (list) => {
-          if (!current) return;
-          setBookings(list);
-          setError(null);
-        },
-        (err: any) => current && setError(err?.message || 'Could not read your UMPoint dashboard.'),
-      )
-      .finally(() => {
-        if (!current) return;
-        setLoading(false);
-        setRefreshing(false);
-      });
-    return () => {
-      current = false;
-    };
-  }, [reloadKey]);
-
-  const refresh = () => {
-    setRefreshing(true);
-    setReloadKey((k) => k + 1);
+/** "23/10/2026 12:00 PM - 12:30 PM" → parts to lay out; falls back to the raw text. */
+function parseWhen(eventDate: string) {
+  const m = eventDate.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)/i);
+  if (!m) return null;
+  const to24 = (t: string) => {
+    const [, h, mm, ap] = t.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i)!;
+    let hour = parseInt(h, 10) % 12;
+    if (ap.toUpperCase() === 'PM') hour += 12;
+    return `${String(hour).padStart(2, '0')}:${mm}`;
   };
+  const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  return { day: `${day} ${+m[1]} ${month}`, start: to24(m[4]), end: to24(m[5]) };
+}
+
+function parseFacility(facility: string) {
+  const m = facility.match(/Gelanggang Badminton (\d)(?:\s+J2)?\s*(.*)/i);
+  return m ? { court: m[1], event: m[2] } : { court: null, event: facility };
+}
+
+export const BookingsScreen: React.FC<{ onOpenSettings: () => void }> = ({ onOpenSettings }) => {
+  const c = useColors();
+  const list = useCached<Booking[]>('bookings', getBookings);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My UMPoint Bookings</Text>
-        <Text style={styles.subtitle}>Active reservations on your Pusat Sukan dashboard</Text>
-      </View>
+    <View style={[styles.flex, { backgroundColor: c.bg }]}>
+      <ScreenHeader title="Bookings" right={<SessionPill onOpenSettings={onOpenSettings} />} />
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={list.refresh} tintColor={c.mat} colors={[c.mat]} />}
+      >
+        <Txt variant="footnote" color={list.error ? c.smash : c.ink3} style={styles.status}>
+          {list.refreshing ? 'Updating…' : list.error ? `Couldn’t refresh: ${list.error}` : 'From your UMPoint dashboard'}
+        </Txt>
 
-      {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#10b981" />
-          <Text style={styles.loadingText}>Reading your dashboard...</Text>
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#10b981" />}
-        >
-          {error ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="cloud-offline-outline" size={56} color="#334155" />
-              <Text style={styles.emptyTitle}>Couldn&apos;t load bookings</Text>
-              <Text style={styles.emptySubtitle}>{error} Pull down to try again.</Text>
-            </View>
-          ) : bookings.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="calendar-blank-outline" size={64} color="#334155" />
-              <Text style={styles.emptyTitle}>No Active Bookings</Text>
-              <Text style={styles.emptySubtitle}>
-                You have no current reservations on UMPoint. Head over to the Courts tab to book a slot.
-              </Text>
-            </View>
+        {list.data === null ? (
+          list.error ? (
+            <Empty icon="cloud-offline-outline" title="Can’t read your bookings" text={list.error} action={<Button label="Try again" tone="plain" onPress={list.refresh} />} />
           ) : (
-            bookings.map((b, idx) => (
-              <View key={`${b.event_date}-${idx}`} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardIconBox}>
-                    <MaterialCommunityIcons name="badminton" size={24} color="#10b981" />
+            <Card style={{ height: 120, backgroundColor: c.surface }}>
+              <View />
+            </Card>
+          )
+        ) : list.data.length === 0 ? (
+          <Empty icon="calendar-clear-outline" title="No bookings" text="Courts you book or snipe show up here." />
+        ) : (
+          list.data.map((b, i) => {
+            const when = parseWhen(b.event_date);
+            const what = parseFacility(b.facility);
+            return (
+              <Card key={`${b.event_date}-${i}`} style={styles.card}>
+                <View style={styles.cardTop}>
+                  <View style={[styles.courtBadge, { backgroundColor: c.mat }]}>
+                    <Txt variant="caption" color={c.courtLine} style={{ fontSize: 9 }}>
+                      Court
+                    </Txt>
+                    <Txt variant="time" color={c.courtLine} style={{ fontSize: 26, lineHeight: 28 }}>
+                      {what.court ?? '–'}
+                    </Txt>
                   </View>
-                  <View style={styles.cardHeaderInfo}>
-                    <Text style={styles.facilityName}>{b.facility}</Text>
-                    {b.invoice ? <Text style={styles.bookingId}>Invoice {b.invoice}</Text> : null}
+                  <View style={styles.flex}>
+                    <Txt variant="caption" color={c.ink3}>
+                      {when?.day ?? b.event_date}
+                    </Txt>
+                    {when ? (
+                      <View style={styles.when}>
+                        <Txt variant="time">{when.start}</Txt>
+                        <Txt variant="headline" color={c.ink2}>
+                          to {when.end}
+                        </Txt>
+                      </View>
+                    ) : null}
+                    {what.event ? (
+                      <Txt variant="footnote" color={c.ink2} numberOfLines={1}>
+                        {what.event}
+                      </Txt>
+                    ) : null}
                   </View>
                 </View>
-
-                <View style={styles.divider} />
-
-                <View style={styles.detailRow}>
-                  <Ionicons name="calendar-outline" size={16} color="#94a3b8" />
-                  <Text style={styles.detailText}>{b.event_date}</Text>
-                </View>
-
-                {b.booking_date ? (
-                  <View style={styles.detailRow}>
-                    <Ionicons name="time-outline" size={16} color="#94a3b8" />
-                    <Text style={styles.detailSubText}>Booked on: {b.booking_date}</Text>
-                  </View>
-                ) : null}
-
                 {b.cancellable ? (
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => setDashboardOpen(true)}>
-                    <Ionicons name="open-outline" size={16} color="#ef4444" style={{ marginRight: 6 }} />
-                    <Text style={styles.cancelButtonText}>Cancel on UMPoint</Text>
-                  </TouchableOpacity>
+                  <Press onPress={() => setDashboardOpen(true)} style={styles.cancel}>
+                    <Ionicons name="open-outline" size={15} color={c.smash} />
+                    <Txt variant="callout" color={c.smash} style={{ fontWeight: '600' }}>
+                      Cancel on UMPoint
+                    </Txt>
+                  </Press>
                 ) : null}
-              </View>
-            ))
-          )}
-        </ScrollView>
-      )}
+              </Card>
+            );
+          })
+        )}
+      </ScrollView>
 
       <UmpointSheet
         visible={dashboardOpen}
         mode="dashboard"
         onClose={() => {
           setDashboardOpen(false);
-          refresh();
+          list.refresh();
         }}
       />
     </View>
   );
 };
 
+function Empty({ icon, title, text, action }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string; action?: React.ReactNode }) {
+  const c = useColors();
+  return (
+    <View style={styles.empty}>
+      <Ionicons name={icon} size={40} color={c.ink3} />
+      <Txt variant="headline" style={{ marginTop: space.m }}>
+        {title}
+      </Txt>
+      <Txt variant="footnote" color={c.ink2} style={{ textAlign: 'center', marginTop: 4 }}>
+        {text}
+      </Txt>
+      {action ? <View style={{ alignSelf: 'stretch', marginTop: space.l }}>{action}</View> : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#090d16',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
-  },
-  title: {
-    color: '#f8fafc',
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  subtitle: {
-    color: '#94a3b8',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#94a3b8',
-    marginTop: 12,
-    fontSize: 14,
-  },
-  list: {
+  flex: {
     flex: 1,
   },
-  listContent: {
-    padding: 16,
-    paddingBottom: 40,
-    gap: 12,
+  content: {
+    paddingHorizontal: space.l,
+    paddingBottom: space.xxl,
   },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 60,
-    paddingHorizontal: 32,
-  },
-  emptyTitle: {
-    color: '#cbd5e1',
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: 16,
-  },
-  emptySubtitle: {
-    color: '#64748b',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
+  status: {
+    paddingHorizontal: space.xs,
+    marginBottom: space.s,
   },
   card: {
-    backgroundColor: '#131b2e',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#1e293b',
+    marginBottom: space.m,
   },
-  cardHeader: {
+  cardTop: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
+    gap: space.l,
+    alignItems: 'center',
   },
-  cardIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#064e3b',
+  courtBadge: {
+    width: 56,
+    height: 64,
+    borderRadius: radius.m,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardHeaderInfo: {
-    flex: 1,
+  when: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: space.s,
+    marginVertical: 2,
   },
-  facilityName: {
-    color: '#f8fafc',
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  bookingId: {
-    color: '#64748b',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#1e293b',
-    marginVertical: 12,
-  },
-  detailRow: {
+  cancel: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: space.m,
   },
-  detailText: {
-    color: '#e2e8f0',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailSubText: {
-    color: '#94a3b8',
-    fontSize: 12,
-  },
-  cancelButton: {
-    flexDirection: 'row',
+  empty: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  cancelButtonText: {
-    color: '#ef4444',
-    fontSize: 13,
-    fontWeight: '700',
+    paddingVertical: space.xxl,
+    paddingHorizontal: space.xl,
   },
 });

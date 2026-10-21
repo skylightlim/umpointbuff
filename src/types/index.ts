@@ -34,3 +34,12 @@ export interface Booking {
   event_date: string;
   cancellable: boolean;
 }
+
+/** All four courts for one week, merged: status[date][start][court]. Serializable for the cache. */
+export interface WeekGrid {
+  week: WeekType;
+  dates: string[];
+  times: { start: string; end: string }[];
+  status: Record<string, Record<string, Record<CourtId, SlotStatus>>>;
+  server_today: string;
+}
