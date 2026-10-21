@@ -27,7 +27,6 @@ export interface GridResponse {
 }
 
 export interface SystemStatus {
-  status: string;
   current_time_myt: string;
   current_week: {
     start: string;

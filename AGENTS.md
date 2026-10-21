@@ -23,11 +23,9 @@ npx expo install --fix      # fix incompatible package versions
 
 Run lint and typecheck before declaring any task done.
 
-## Navigation & Routing
+## Navigation
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- The app has four tabs (Courts, Sniper, Bookings, Settings), switched with `useState` in `App.tsx`. There is no router: four screens with no deep links don't need one. Keep it this way unless deep links become a requirement.
 
 ## Building with EAS
 

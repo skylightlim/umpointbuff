@@ -5,20 +5,15 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { getAppMode, getServerUrl, getStatus, setAppMode, setServerUrl } from '../services/api';
+import { getStatus } from '../services/api';
 import { clearSession, getSessionCookies } from '../services/session';
 import { SystemStatus } from '../types';
 import { LoginModal } from '../components/LoginModal';
 
 export const SettingsScreen: React.FC = () => {
-  const [appMode, setAppModeState] = useState<'standalone' | 'server'>('standalone');
-  const [urlInput, setUrlInput] = useState<string>('');
-  const [testing, setTesting] = useState<boolean>(false);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [cookies, setCookies] = useState<string>('');
   const [loginModalVisible, setLoginModalVisible] = useState<boolean>(false);
@@ -28,13 +23,7 @@ export const SettingsScreen: React.FC = () => {
   }, []);
 
   const loadSettings = async () => {
-    const mode = await getAppMode();
-    const url = await getServerUrl();
-    const currentCookies = await getSessionCookies();
-
-    setAppModeState(mode);
-    setUrlInput(url);
-    setCookies(currentCookies);
+    setCookies(await getSessionCookies());
 
     try {
       const s = await getStatus();
@@ -42,26 +31,6 @@ export const SettingsScreen: React.FC = () => {
     } catch {
       setStatus(null);
     }
-  };
-
-  const handleToggleMode = async (mode: 'standalone' | 'server') => {
-    await setAppMode(mode);
-    setAppModeState(mode);
-    try {
-      const s = await getStatus();
-      setStatus(s);
-    } catch {
-      setStatus(null);
-    }
-  };
-
-  const handleSaveUrl = async () => {
-    if (!urlInput.trim()) {
-      Alert.alert('Invalid URL', 'Please enter a valid backend server URL.');
-      return;
-    }
-    await setServerUrl(urlInput.trim());
-    Alert.alert('Saved', 'Server URL updated.');
   };
 
   const handleClearCookies = async () => {
@@ -84,50 +53,6 @@ export const SettingsScreen: React.FC = () => {
       <View style={styles.header}>
         <Text style={styles.title}>Settings & Account</Text>
         <Text style={styles.subtitle}>Configure mobile client and UMPoint credentials</Text>
-      </View>
-
-      {/* Mode Selector Card */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <MaterialCommunityIcons name="cellphone-wireless" size={20} color="#10b981" />
-          <Text style={styles.cardTitle}>App Operation Mode</Text>
-        </View>
-
-        <View style={styles.modeToggleRow}>
-          <TouchableOpacity
-            style={[styles.modeBtn, appMode === 'standalone' && styles.modeBtnActive]}
-            onPress={() => handleToggleMode('standalone')}
-          >
-            <Ionicons
-              name="phone-portrait-outline"
-              size={18}
-              color={appMode === 'standalone' ? '#ffffff' : '#94a3b8'}
-            />
-            <Text style={[styles.modeBtnText, appMode === 'standalone' && styles.modeBtnTextActive]}>
-              100% On Phone (Direct)
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.modeBtn, appMode === 'server' && styles.modeBtnActive]}
-            onPress={() => handleToggleMode('server')}
-          >
-            <Ionicons
-              name="server-outline"
-              size={18}
-              color={appMode === 'server' ? '#ffffff' : '#94a3b8'}
-            />
-            <Text style={[styles.modeBtnText, appMode === 'server' && styles.modeBtnTextActive]}>
-              External Server
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.modeDescription}>
-          {appMode === 'standalone'
-            ? '✅ Standalone Mode: Your phone talks directly to UMPoint. No PC or external backend server needed!'
-            : '🌐 Server Mode: Connects to a remote Python bot for overnight background sniping while phone is asleep.'}
-        </Text>
       </View>
 
       {/* UMPoint Student Session Card */}
@@ -161,41 +86,12 @@ export const SettingsScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* External Server Configuration (Only visible in server mode) */}
-      {appMode === 'server' && (
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="cloud-outline" size={20} color="#a855f7" />
-            <Text style={styles.cardTitle}>Backend Server Configuration</Text>
-          </View>
-
-          <Text style={styles.inputLabel}>Server URL</Text>
-          <TextInput
-            style={styles.textInput}
-            value={urlInput}
-            onChangeText={setUrlInput}
-            placeholder="http://10.221.34.186:8000"
-            placeholderTextColor="#64748b"
-            autoCapitalize="none"
-          />
-
-          <TouchableOpacity style={styles.saveUrlBtn} onPress={handleSaveUrl}>
-            <Text style={styles.saveUrlBtnText}>Save Server URL</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Live System Diagnostics */}
       {status && (
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <MaterialCommunityIcons name="cloud-sync-outline" size={20} color="#38bdf8" />
             <Text style={styles.cardTitle}>System Synchronization</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Mode:</Text>
-            <Text style={styles.infoValueBold}>{status.status}</Text>
           </View>
 
           <View style={styles.infoRow}>
@@ -300,40 +196,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  modeToggleRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modeBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    backgroundColor: '#0f172a',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#334155',
-    gap: 6,
-  },
-  modeBtnActive: {
-    backgroundColor: '#065f46',
-    borderColor: '#10b981',
-  },
-  modeBtnText: {
-    color: '#94a3b8',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  modeBtnTextActive: {
-    color: '#ffffff',
-  },
-  modeDescription: {
-    color: '#94a3b8',
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 12,
-  },
   sessionStatusBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -386,35 +248,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
-  inputLabel: {
-    color: '#94a3b8',
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  textInput: {
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-    color: '#f8fafc',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-  },
-  saveUrlBtn: {
-    backgroundColor: '#1e293b',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  saveUrlBtnText: {
-    color: '#f8fafc',
-    fontSize: 14,
-    fontWeight: '700',
-  },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -430,11 +263,6 @@ const styles = StyleSheet.create({
     color: '#f8fafc',
     fontSize: 13,
     fontWeight: '600',
-  },
-  infoValueBold: {
-    color: '#10b981',
-    fontSize: 14,
-    fontWeight: '800',
   },
   bulletItem: {
     flexDirection: 'row',
