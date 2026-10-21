@@ -1,16 +1,67 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, Platform, StatusBar as RNStatusBar } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AppState,
+  PermissionsAndroid,
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  SafeAreaView,
+  Platform,
+  StatusBar as RNStatusBar,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { CourtsScreen } from './src/screens/CourtsScreen';
 import { BookingsScreen } from './src/screens/BookingsScreen';
 import { SniperScreen } from './src/screens/SniperScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { UmpointSheet } from './src/components/UmpointSheet';
+import { Sniper } from './modules/umpoint-sniper';
+import { onSignInRequest, refreshSession, requestSignIn, useSession } from './src/services/session';
 
 type Tab = 'courts' | 'sniper' | 'bookings' | 'settings';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('courts');
+  const [signIn, setSignIn] = useState<{ reason?: string } | null>(null);
+  const signInOpen = useRef(false);
+  const session = useSession();
+
+  useEffect(() => {
+    signInOpen.current = signIn !== null;
+  }, [signIn]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && Number(Platform.Version) >= 33) {
+      PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    }
+    refreshSession();
+    const offRequest = onSignInRequest((reason) => setSignIn({ reason }));
+    const appState = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refreshSession();
+    });
+    // When the sniper rings for a sign-in, opening the app goes straight to the sign-in sheet.
+    const poll = setInterval(() => {
+      if (AppState.currentState === 'active' && !signInOpen.current && Sniper.status().needsSignIn) {
+        requestSignIn('The sniper fires at 00:00 and your UMPoint session has expired. Sign in now.');
+      }
+    }, 2000);
+    return () => {
+      offRequest();
+      appState.remove();
+      clearInterval(poll);
+    };
+  }, []);
+
+  const pill =
+    session === 'signed_in'
+      ? { text: 'SIGNED IN', color: '#10b981' }
+      : session === 'signed_out'
+        ? { text: 'SIGN IN', color: '#f59e0b' }
+        : session === 'offline'
+          ? { text: 'OFFLINE', color: '#94a3b8' }
+          : { text: 'CHECKING', color: '#94a3b8' };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -28,10 +79,14 @@ export default function App() {
           </View>
         </View>
 
-        <View style={styles.serverStatusPill}>
-          <View style={styles.greenDot} />
-          <Text style={styles.serverStatusText}>BOT SYNC</Text>
-        </View>
+        <TouchableOpacity
+          style={[styles.serverStatusPill, { borderColor: pill.color, backgroundColor: pill.color + '1f' }]}
+          onPress={() => (session === 'signed_in' ? setActiveTab('settings') : requestSignIn())}
+          accessibilityLabel={`UMPoint session: ${pill.text.toLowerCase()}`}
+        >
+          <View style={[styles.greenDot, { backgroundColor: pill.color }]} />
+          <Text style={[styles.serverStatusText, { color: pill.color }]}>{pill.text}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Screen Body */}
@@ -107,6 +162,16 @@ export default function App() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <UmpointSheet
+        visible={signIn !== null}
+        mode="signin"
+        reason={signIn?.reason}
+        onClose={() => {
+          setSignIn(null);
+          refreshSession();
+        }}
+      />
     </SafeAreaView>
   );
 }

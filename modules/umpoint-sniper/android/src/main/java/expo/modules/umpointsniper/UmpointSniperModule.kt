@@ -87,13 +87,41 @@ class UmpointSniperModule : Module() {
       val http = UmpointHttp(ctx)
       val booker = Booker(ctx, http) { SniperLog.line(ctx, "[book now ${task.date}] $it") }
       SniperLog.line(ctx, "book now: ${task.date} ${task.start}-${task.end} court ${task.court} any=${task.anyCourt}")
+      val weekTs = Umpoint.rolloverFor(task.date) / 1000
       val r = try {
-        booker.book(task, Umpoint.rolloverFor(task.date) / 1000, 0L)
+        if (http.sessionAlive() != true) throw SessionExpired()
+        booker.book(task, weekTs, 0L)
       } catch (e: SessionExpired) {
-        Booker.Result("signed_out", "Your UMPoint session expired. Sign in again in Settings.", null)
+        val oauth = http.oauthUrl()
+        if (oauth != null && (http.renewByRedirects(oauth) || http.renewInWebView(oauth))) {
+          try {
+            booker.book(task, weekTs, 0L)
+          } catch (e2: SessionExpired) {
+            Booker.Result("signed_out", "Your UMPoint session expired. Sign in again.", null)
+          }
+        } else {
+          Booker.Result("signed_out", "Your UMPoint session expired. Sign in again.", null)
+        }
       }
       SniperLog.line(ctx, "book now result: ${r.status} ${r.message}")
       JSONObject().put("status", r.status).put("message", r.message).put("court", r.court ?: JSONObject.NULL).toString()
+    }
+
+    /**
+     * Signs back in without the user (UMPoint drops a session after 10–20 idle minutes), using
+     * the Google cookies the sign-in sheet left. "alive", "renewed", or "needs_sign_in".
+     */
+    AsyncFunction("renewSession") {
+      val http = UmpointHttp(ctx)
+      when {
+        http.sessionAlive() == true -> "alive"
+        else -> {
+          val oauth = http.oauthUrl()
+          val ok = oauth != null && (http.renewByRedirects(oauth) || http.renewInWebView(oauth))
+          SniperLog.line(ctx, "app renew: ${if (ok) "renewed" else "needs sign-in"}")
+          if (ok) "renewed" else "needs_sign_in"
+        }
+      }
     }
 
     AsyncFunction("clearSession") { UmpointHttp(ctx).clearSession() }

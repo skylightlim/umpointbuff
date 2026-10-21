@@ -6,163 +6,127 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
   RefreshControl,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { cancelBooking, getBookings } from '../services/api';
+import { getBookings } from '../services/api';
+import { UmpointSheet } from '../components/UmpointSheet';
 import { Booking } from '../types';
 
 export const BookingsScreen: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dashboardOpen, setDashboardOpen] = useState<boolean>(false);
 
-  const fetchBookingsList = async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    try {
-      const data = await getBookings();
-      setBookings(data);
-    } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Could not fetch dashboard bookings.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const [reloadKey, setReloadKey] = useState<number>(0);
 
   useEffect(() => {
-    fetchBookingsList();
-  }, []);
-
-  const handleCancel = (booking: Booking) => {
-    if (!booking.cancel_id) {
-      Alert.alert('Cannot Cancel', 'This booking does not allow cancellation.');
-      return;
-    }
-
-    Alert.alert(
-      'Confirm Cancellation',
-      `Are you sure you want to cancel your booking for:\n\n${booking.facility}\n${booking.event_date}?`,
-      [
-        { text: 'Keep Booking', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: async () => {
-            setCancellingId(booking.cancel_id);
-            try {
-              const res = await cancelBooking(booking.cancel_id);
-              if (res.success) {
-                Alert.alert('Cancelled', 'Your reservation was successfully cancelled.');
-                setBookings(res.remaining);
-              }
-            } catch (err: any) {
-              Alert.alert('Cancellation Error', err?.message || 'Failed to cancel reservation.');
-            } finally {
-              setCancellingId(null);
-            }
-          },
+    let current = true;
+    getBookings()
+      .then(
+        (list) => {
+          if (!current) return;
+          setBookings(list);
+          setError(null);
         },
-      ]
-    );
+        (err: any) => current && setError(err?.message || 'Could not read your UMPoint dashboard.'),
+      )
+      .finally(() => {
+        if (!current) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [reloadKey]);
+
+  const refresh = () => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>My UMPoint Bookings</Text>
-        <Text style={styles.subtitle}>Active reservations on Pusat Sukan dashboard</Text>
+        <Text style={styles.subtitle}>Active reservations on your Pusat Sukan dashboard</Text>
       </View>
 
-      {loading && !refreshing ? (
+      {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#10b981" />
-          <Text style={styles.loadingText}>Loading dashboard reservations...</Text>
+          <Text style={styles.loadingText}>Reading your dashboard...</Text>
         </View>
       ) : (
         <ScrollView
           style={styles.list}
           contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => fetchBookingsList(true)}
-              tintColor="#10b981"
-            />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#10b981" />}
         >
-          {bookings.length === 0 ? (
+          {error ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cloud-offline-outline" size={56} color="#334155" />
+              <Text style={styles.emptyTitle}>Couldn&apos;t load bookings</Text>
+              <Text style={styles.emptySubtitle}>{error} Pull down to try again.</Text>
+            </View>
+          ) : bookings.length === 0 ? (
             <View style={styles.emptyContainer}>
               <MaterialCommunityIcons name="calendar-blank-outline" size={64} color="#334155" />
               <Text style={styles.emptyTitle}>No Active Bookings</Text>
               <Text style={styles.emptySubtitle}>
-                You have no current reservations on the UMPoint system. Head over to the Courts tab to book a slot.
+                You have no current reservations on UMPoint. Head over to the Courts tab to book a slot.
               </Text>
             </View>
           ) : (
-            bookings.map((b, idx) => {
-              const isCancelling = cancellingId === b.cancel_id;
-              const isPending = b.status.toLowerCase().includes('pending');
-
-              return (
-                <View key={b.cancel_id || idx} style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.cardIconBox}>
-                      <MaterialCommunityIcons name="badminton" size={24} color="#10b981" />
-                    </View>
-                    <View style={styles.cardHeaderInfo}>
-                      <Text style={styles.facilityName}>{b.facility}</Text>
-                      {b.cancel_id ? (
-                        <Text style={styles.bookingId}>Booking ID: #{b.cancel_id}</Text>
-                      ) : null}
-                    </View>
-                    <View style={[styles.statusBadge, isPending ? styles.statusBadgePending : styles.statusBadgeConfirmed]}>
-                      <Text style={[styles.statusBadgeText, isPending ? styles.statusTextPending : styles.statusTextConfirmed]}>
-                        {b.status}
-                      </Text>
-                    </View>
+            bookings.map((b, idx) => (
+              <View key={`${b.event_date}-${idx}`} style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardIconBox}>
+                    <MaterialCommunityIcons name="badminton" size={24} color="#10b981" />
                   </View>
-
-                  <View style={styles.divider} />
-
-                  <View style={styles.detailRow}>
-                    <Ionicons name="calendar-outline" size={16} color="#94a3b8" />
-                    <Text style={styles.detailText}>{b.event_date}</Text>
+                  <View style={styles.cardHeaderInfo}>
+                    <Text style={styles.facilityName}>{b.facility}</Text>
+                    {b.invoice ? <Text style={styles.bookingId}>Invoice {b.invoice}</Text> : null}
                   </View>
-
-                  {b.booking_date ? (
-                    <View style={styles.detailRow}>
-                      <Ionicons name="time-outline" size={16} color="#94a3b8" />
-                      <Text style={styles.detailSubText}>Booked on: {b.booking_date}</Text>
-                    </View>
-                  ) : null}
-
-                  {b.cancel_id ? (
-                    <TouchableOpacity
-                      style={[styles.cancelButton, isCancelling && styles.cancelButtonDisabled]}
-                      onPress={() => handleCancel(b)}
-                      disabled={isCancelling}
-                    >
-                      {isCancelling ? (
-                        <ActivityIndicator size="small" color="#ef4444" />
-                      ) : (
-                        <>
-                          <Ionicons name="trash-outline" size={16} color="#ef4444" style={{ marginRight: 6 }} />
-                          <Text style={styles.cancelButtonText}>Cancel Reservation</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  ) : null}
                 </View>
-              );
-            })
+
+                <View style={styles.divider} />
+
+                <View style={styles.detailRow}>
+                  <Ionicons name="calendar-outline" size={16} color="#94a3b8" />
+                  <Text style={styles.detailText}>{b.event_date}</Text>
+                </View>
+
+                {b.booking_date ? (
+                  <View style={styles.detailRow}>
+                    <Ionicons name="time-outline" size={16} color="#94a3b8" />
+                    <Text style={styles.detailSubText}>Booked on: {b.booking_date}</Text>
+                  </View>
+                ) : null}
+
+                {b.cancellable ? (
+                  <TouchableOpacity style={styles.cancelButton} onPress={() => setDashboardOpen(true)}>
+                    <Ionicons name="open-outline" size={16} color="#ef4444" style={{ marginRight: 6 }} />
+                    <Text style={styles.cancelButtonText}>Cancel on UMPoint</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ))
           )}
         </ScrollView>
       )}
+
+      <UmpointSheet
+        visible={dashboardOpen}
+        mode="dashboard"
+        onClose={() => {
+          setDashboardOpen(false);
+          refresh();
+        }}
+      />
     </View>
   );
 };
@@ -258,27 +222,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  statusBadgePending: {
-    backgroundColor: '#854d0e',
-  },
-  statusBadgeConfirmed: {
-    backgroundColor: '#065f46',
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  statusTextPending: {
-    color: '#fef08a',
-  },
-  statusTextConfirmed: {
-    color: '#34d399',
-  },
   divider: {
     height: 1,
     backgroundColor: '#1e293b',
@@ -309,9 +252,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  cancelButtonDisabled: {
-    opacity: 0.5,
   },
   cancelButtonText: {
     color: '#ef4444',

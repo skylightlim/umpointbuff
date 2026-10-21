@@ -1,0 +1,1 @@
+int drawable umpoint_sniper_icon 0x0

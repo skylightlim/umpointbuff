@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,9 +9,11 @@ import {
   Alert,
   TextInput,
   Modal,
+  Switch,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { bookCourt, getGrid, scheduleSnipe } from '../services/api';
+import { CLOSING_TIME, dayLabel, minutes, mytDate } from '../services/umpointClient';
 import { CourtId, GridResponse, WeekType } from '../types';
 
 interface Props {
@@ -19,76 +21,107 @@ interface Props {
   onNavigateToBookings?: () => void;
 }
 
+/** For the 26 Oct 2026 study: snipes also record how fast courts go until 01:00. */
+const RECORD_ROLLOVER = true;
+
+const DURATIONS = [
+  { label: '30 min', dur: 1 },
+  { label: '1 hour', dur: 2 },
+  { label: '1.5 hrs', dur: 3 },
+  { label: '2 hours', dur: 4 },
+];
+
 export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateToBookings }) => {
   const [selectedWeek, setSelectedWeek] = useState<WeekType>('this');
   const [selectedCourt, setSelectedCourt] = useState<CourtId>('1');
   const [selectedDateIndex, setSelectedDateIndex] = useState<number>(0);
   const [gridData, setGridData] = useState<GridResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Selection for booking / sniping
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
-  const [slotDuration, setSlotDuration] = useState<number>(1); // 1 = 30 min, 2 = 1 hr, 3 = 1.5 hr, 4 = 2 hr
+  const [slotDuration, setSlotDuration] = useState<number>(2); // in 30-minute slots
   const [eventTitle, setEventTitle] = useState<string>('Badminton practice');
   const [pax, setPax] = useState<number>(4);
+  const [anyCourt, setAnyCourt] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [modalVisible, setModalVisible] = useState<boolean>(false);
 
-  const fetchGrid = async (court: CourtId, week: WeekType, isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    try {
-      const data = await getGrid(court, week);
-      setGridData(data);
-    } catch (err: any) {
-      Alert.alert('Error Fetching Court Schedule', err?.message || 'Could not connect to server.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const [reloadKey, setReloadKey] = useState<number>(0);
 
   useEffect(() => {
-    fetchGrid(selectedCourt, selectedWeek);
-  }, [selectedCourt, selectedWeek]);
+    let current = true;
+    getGrid(selectedCourt, selectedWeek)
+      .then(
+        (grid) => {
+          if (!current) return;
+          setGridData(grid);
+          setError(null);
+        },
+        (err: any) => current && setError(err?.message || 'Could not load the court schedule.'),
+      )
+      .finally(() => current && setLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [selectedCourt, selectedWeek, reloadKey]);
+
+  const refresh = () => {
+    setLoading(true);
+    setReloadKey((k) => k + 1);
+  };
+
+  const pickWeek = (week: WeekType) => {
+    if (week === selectedWeek) return;
+    setLoading(true);
+    setSelectedWeek(week);
+    setSelectedDateIndex(0);
+  };
+
+  const pickCourt = (court: CourtId) => {
+    if (court === selectedCourt) return;
+    setLoading(true);
+    setSelectedCourt(court);
+  };
 
   const dates = gridData?.dates || [];
   const currentDateStr = dates[selectedDateIndex] || '';
 
+  // The 19:00 row UMPoint draws can't be booked: courts close at 19:00.
   const daySlots = useMemo(() => {
     if (!gridData) return [];
-    return gridData.slots.map((slot, index) => {
-      const cell = slot.cells[selectedDateIndex];
-      return {
-        index,
-        time_start: slot.time_start,
-        time_end: slot.time_end,
-        status: cell?.status || 'unavailable',
-        cell_id: cell?.cell_id || '',
-        text: cell?.text || '',
-      };
-    });
+    return gridData.slots
+      .filter((slot) => minutes(slot.time_start) < minutes(CLOSING_TIME))
+      .map((slot, index) => {
+        const cell = slot.cells[selectedDateIndex];
+        return {
+          index,
+          time_start: slot.time_start,
+          time_end: slot.time_end,
+          status: cell?.status || 'unavailable',
+        };
+      });
   }, [gridData, selectedDateIndex]);
 
-  // Derived selected times
   const selectedRange = useMemo(() => {
     if (selectedSlotIndex === null || !daySlots[selectedSlotIndex]) return null;
-    const startSlot = daySlots[selectedSlotIndex];
-    const endIndex = Math.min(daySlots.length - 1, selectedSlotIndex + slotDuration - 1);
-    const endSlot = daySlots[endIndex];
+    const endIndex = selectedSlotIndex + slotDuration - 1;
+    if (endIndex >= daySlots.length) return null;
+    const span = daySlots.slice(selectedSlotIndex, endIndex + 1);
     return {
-      start: startSlot.time_start,
-      end: endSlot.time_end,
-      isValid: daySlots.slice(selectedSlotIndex, endIndex + 1).every((s) => s.status === 'free'),
+      start: span[0].time_start,
+      end: span[span.length - 1].time_end,
+      // A snipe targets next week, where every slot looks free until someone takes it at 00:00.
+      isValid: span.every((s) => s.status === 'free'),
     };
   }, [selectedSlotIndex, slotDuration, daySlots]);
 
   const handleSelectSlot = (idx: number) => {
     const slot = daySlots[idx];
     if (slot.status !== 'free') {
-      Alert.alert('Slot Occupied', `This slot is currently ${slot.status.toUpperCase()}. Please choose an available green slot.`);
+      const what = slot.status === 'mine' ? 'already yours' : slot.status === 'closed' ? 'closed' : 'taken';
+      Alert.alert('Slot not free', `This slot is ${what}. Pick a green one.`);
       return;
     }
     setSelectedSlotIndex(idx);
@@ -104,57 +137,53 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
         start: selectedRange.start,
         end: selectedRange.end,
         court: selectedCourt,
+        anyCourt: false,
         event: eventTitle,
         pax,
       });
-
-      if (res.success) {
-        Alert.alert('Booking Confirmed!', res.message, [
+      if (res.status === 'booked') {
+        setModalVisible(false);
+        refresh();
+        Alert.alert('Court booked', res.message, [
           { text: 'View Bookings', onPress: () => onNavigateToBookings && onNavigateToBookings() },
           { text: 'OK' },
         ]);
-        setModalVisible(false);
-        fetchGrid(selectedCourt, selectedWeek, true);
       } else {
-        Alert.alert('Booking Notice', res.message);
+        Alert.alert('Not booked', res.message);
       }
     } catch (err: any) {
-      Alert.alert('Booking Failed', err?.message || 'Server error occurred');
+      Alert.alert('Booking failed', err?.message || 'Something went wrong.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleScheduleSnipe = async () => {
+  const handleScheduleSnipe = () => {
     if (!selectedRange) return;
-    setSubmitting(true);
     try {
-      const res = await scheduleSnipe({
+      const task = scheduleSnipe({
         date: currentDateStr,
         start: selectedRange.start,
         end: selectedRange.end,
         court: selectedCourt,
+        anyCourt,
         event: eventTitle,
         pax,
+        measure: RECORD_ROLLOVER,
       });
-
-      if (res.success) {
-        Alert.alert(
-          'Sniper Scheduled!',
-          `Auto-Sniper queued for Monday 00:00:00 MYT rollover.\n\nSlot: ${currentDateStr} ${selectedRange.start}-${selectedRange.end} (Court ${selectedCourt})`,
-          [
-            { text: 'View Sniper Queue', onPress: () => onNavigateToSniper && onNavigateToSniper() },
-            { text: 'OK' },
-          ]
-        );
-        setModalVisible(false);
-      } else {
-        Alert.alert('Scheduling Notice', res.message);
-      }
+      setModalVisible(false);
+      Alert.alert(
+        'Sniper armed',
+        `It fires at 00:00:00 MYT on ${dayLabel(mytDate(task.fireAt))}.\n\n` +
+          `${currentDateStr} ${selectedRange.start}–${selectedRange.end}, Court ${selectedCourt}${anyCourt ? ' (or any free court)' : ''}.\n\n` +
+          'Leave the phone on the charger. If your session has expired at 23:50 and the app can’t renew it, the phone will ring.',
+        [
+          { text: 'View Sniper', onPress: () => onNavigateToSniper && onNavigateToSniper() },
+          { text: 'OK' },
+        ],
+      );
     } catch (err: any) {
-      Alert.alert('Scheduling Error', err?.message || 'Server error occurred');
-    } finally {
-      setSubmitting(false);
+      Alert.alert('Could not arm the sniper', err?.message || 'Something went wrong.');
     }
   };
 
@@ -164,7 +193,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
       <View style={styles.weekToggleContainer}>
         <TouchableOpacity
           style={[styles.weekToggleButton, selectedWeek === 'this' && styles.weekToggleActive]}
-          onPress={() => setSelectedWeek('this')}
+          onPress={() => pickWeek('this')}
         >
           <Text style={[styles.weekToggleText, selectedWeek === 'this' && styles.weekToggleTextActive]}>
             This Week (Current)
@@ -172,7 +201,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.weekToggleButton, selectedWeek === 'next' && styles.weekToggleActive]}
-          onPress={() => setSelectedWeek('next')}
+          onPress={() => pickWeek('next')}
         >
           <View style={styles.rowCenter}>
             <Text style={[styles.weekToggleText, selectedWeek === 'next' && styles.weekToggleTextActive]}>
@@ -193,7 +222,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
             <TouchableOpacity
               key={c}
               style={[styles.courtChip, isSelected && styles.courtChipActive]}
-              onPress={() => setSelectedCourt(c)}
+              onPress={() => pickCourt(c)}
             >
               <MaterialCommunityIcons
                 name="badminton"
@@ -246,22 +275,30 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
           <ActivityIndicator size="large" color="#10b981" />
           <Text style={styles.loadingText}>Loading live court availability...</Text>
         </View>
+      ) : error ? (
+        <View style={styles.centerContainer}>
+          <Ionicons name="cloud-offline-outline" size={48} color="#334155" />
+          <Text style={styles.loadingText}>{error}</Text>
+          <TouchableOpacity onPress={refresh} style={styles.retryBtn}>
+            <Text style={styles.retryText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView style={styles.slotList} contentContainerStyle={styles.slotListContent}>
           <View style={styles.slotListHeader}>
             <Text style={styles.slotListTitle}>
               Gelanggang Badminton {selectedCourt} • {currentDateStr}
             </Text>
-            <TouchableOpacity onPress={() => fetchGrid(selectedCourt, selectedWeek, true)}>
+            <TouchableOpacity onPress={refresh} accessibilityLabel="Refresh">
               <Ionicons name="refresh" size={18} color="#10b981" />
             </TouchableOpacity>
           </View>
 
           {daySlots.map((slot) => {
             const isFree = slot.status === 'free';
-            const isPending = slot.status === 'pending';
-            const isBooked = slot.status === 'booked';
-            const isClosed = slot.status === 'closed';
+            const isPending = slot.status === 'mine';
+            const isBooked = slot.status === 'taken';
+            const isClosed = slot.status === 'closed' || slot.status === 'unavailable';
 
             return (
               <TouchableOpacity
@@ -299,7 +336,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
                         isBooked && styles.statusPillTextBooked,
                       ]}
                     >
-                      {slot.status.toUpperCase()}
+                      {slot.status === 'mine' ? 'YOURS' : slot.status === 'unavailable' ? 'CLOSED' : slot.status.toUpperCase()}
                     </Text>
                   </View>
                 </View>
@@ -312,7 +349,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
                 ) : (
                   <View style={styles.bookActionIcon}>
                     <Ionicons
-                      name={isPending ? 'hourglass-outline' : isBooked ? 'lock-closed-outline' : 'close-circle-outline'}
+                      name={isPending ? 'person-circle-outline' : isBooked ? 'lock-closed-outline' : 'close-circle-outline'}
                       size={18}
                       color="#64748b"
                     />
@@ -331,10 +368,10 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>
-                  {selectedWeek === 'this' ? 'Book Court' : 'Schedule Rollover Sniper'}
+                  {selectedWeek === 'this' ? 'Book Court' : 'Arm the Monday 00:00 sniper'}
                 </Text>
                 <Text style={styles.modalSubtitle}>
-                  Gelanggang {selectedCourt} • {currentDateStr}
+                  Court {selectedCourt} • {currentDateStr ? dayLabel(currentDateStr) : ''}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseBtn}>
@@ -346,26 +383,32 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
             <View style={styles.modalSection}>
               <Text style={styles.inputLabel}>Duration</Text>
               <View style={styles.durationRow}>
-                {[
-                  { label: '30 min', dur: 1 },
-                  { label: '1 hour', dur: 2 },
-                  { label: '1.5 hrs', dur: 3 },
-                  { label: '2 hours', dur: 4 },
-                ].map((item) => (
+                {DURATIONS.map((item) => {
+                  const fits = selectedSlotIndex !== null && selectedSlotIndex + item.dur <= daySlots.length;
+                  return (
                   <TouchableOpacity
                     key={item.dur}
-                    style={[styles.durationChip, slotDuration === item.dur && styles.durationChipActive]}
-                    onPress={() => setSlotDuration(item.dur)}
+                    style={[
+                      styles.durationChip,
+                      slotDuration === item.dur && styles.durationChipActive,
+                      !fits && styles.durationChipDisabled,
+                    ]}
+                    onPress={() => fits && setSlotDuration(item.dur)}
+                    disabled={!fits}
                   >
                     <Text style={[styles.durationChipText, slotDuration === item.dur && styles.durationChipTextActive]}>
                       {item.label}
                     </Text>
                   </TouchableOpacity>
-                ))}
+                  );
+                })}
               </View>
             </View>
 
             {/* Selected Range Display */}
+            {!selectedRange && (
+              <Text style={styles.invalidRangeWarn}>Courts close at 19:00 — pick a shorter time.</Text>
+            )}
             {selectedRange && (
               <View style={styles.selectedTimeBox}>
                 <Ionicons name="time-outline" size={20} color="#10b981" />
@@ -373,7 +416,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
                   {selectedRange.start} – {selectedRange.end}
                 </Text>
                 {!selectedRange.isValid && (
-                  <Text style={styles.invalidRangeWarn}>⚠️ Some slots in range are occupied</Text>
+                  <Text style={styles.invalidRangeWarn}>Part of this time is already taken</Text>
                 )}
               </View>
             )}
@@ -406,6 +449,18 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
               />
             </View>
 
+            {selectedWeek === 'next' && (
+              <View style={styles.anyCourtRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.anyCourtTitle}>Any court</Text>
+                  <Text style={styles.anyCourtText}>
+                    If Court {selectedCourt} is gone at 00:00, try the other courts one at a time. You never get more than one.
+                  </Text>
+                </View>
+                <Switch value={anyCourt} onValueChange={setAnyCourt} trackColor={{ true: '#ef4444' }} />
+              </View>
+            )}
+
             {/* Action Buttons */}
             {selectedWeek === 'this' ? (
               <TouchableOpacity
@@ -433,7 +488,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
                 ) : (
                   <>
                     <MaterialCommunityIcons name="target" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-                    <Text style={styles.submitButtonText}>Queue for Mon 00:00 Rollover</Text>
+                    <Text style={styles.submitButtonText}>Arm for Mon 00:00:00</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -446,6 +501,44 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
 };
 
 const styles = StyleSheet.create({
+  retryBtn: {
+    marginTop: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#131b2e',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  retryText: {
+    color: '#10b981',
+    fontWeight: '700',
+  },
+  durationChipDisabled: {
+    opacity: 0.35,
+  },
+  anyCourtRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    marginBottom: 14,
+    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  anyCourtTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  anyCourtText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
   container: {
     flex: 1,
     backgroundColor: '#090d16',

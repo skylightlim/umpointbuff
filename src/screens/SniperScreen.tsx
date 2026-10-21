@@ -1,231 +1,254 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Alert,
-  RefreshControl,
+  AppState,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { cancelTask, getStatus, getTasks } from '../services/api';
-import { SniperTask, SystemStatus } from '../types';
+import { PhoneSetup, Sniper, SniperTask } from '../../modules/umpoint-sniper';
+import { dayLabel, mytDate, nextRolloverMs } from '../services/umpointClient';
 
 interface Props {
   onNavigateToCourts?: () => void;
 }
 
+const STATUS: Record<SniperTask['status'], { label: string; color: string }> = {
+  armed: { label: 'ARMED', color: '#f59e0b' },
+  running: { label: 'RUNNING', color: '#38bdf8' },
+  ringing: { label: 'NEEDS SIGN-IN', color: '#ef4444' },
+  booked: { label: 'BOOKED', color: '#10b981' },
+  failed: { label: 'NOT BOOKED', color: '#ef4444' },
+  dry_run: { label: 'TEST OK', color: '#10b981' },
+  missed: { label: 'MISSED', color: '#94a3b8' },
+  cancelled: { label: 'CANCELLED', color: '#64748b' },
+};
+
+const finished = (t: SniperTask) => !['armed', 'running', 'ringing'].includes(t.status);
+
+function countdown(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const hms = [Math.floor((s % 86400) / 3600), Math.floor((s % 3600) / 60), s % 60]
+    .map((n) => String(n).padStart(2, '0'))
+    .join(':');
+  return d > 0 ? `${d}d ${hms}` : hms;
+}
+
+function fireLabel(t: SniperTask): string {
+  const time = new Date(t.fireAt + 8 * 3_600_000).toISOString().slice(11, 19);
+  return `${dayLabel(mytDate(t.fireAt))}, ${time} MYT`;
+}
+
 export const SniperScreen: React.FC<Props> = ({ onNavigateToCourts }) => {
-  const [tasks, setTasks] = useState<SniperTask[]>([]);
-  const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [countdownStr, setCountdownStr] = useState<string>('--:--:--');
+  const [tasks, setTasks] = useState<SniperTask[]>(() => Sniper.tasks());
+  const [setup, setSetup] = useState<PhoneSetup>(() => Sniper.phoneSetup());
+  const [now, setNow] = useState<number>(() => Date.now());
 
-  const fetchData = async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  const reload = useCallback(() => {
+    setTasks(Sniper.tasks());
+    setSetup(Sniper.phoneSetup());
+  }, []);
 
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const poll = setInterval(reload, 3000);
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && reload());
+    return () => {
+      clearInterval(tick);
+      clearInterval(poll);
+      sub.remove();
+    };
+  }, [reload]);
+
+  const rollover = nextRolloverMs(now);
+  const ready = setup.notifications && setup.exactAlarms && setup.fullScreen && !setup.backgroundRestricted;
+
+  const fixNotifications = async () => {
+    if (Platform.OS === 'android' && Number(Platform.Version) >= 33) {
+      const r = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      if (r === 'granted') return reload();
+    }
+    Sniper.openSettings('notifications');
+  };
+
+  const setupRows: { ok: boolean; title: string; text: string; fix: () => void }[] = [
+    {
+      ok: setup.notifications,
+      title: 'Notifications',
+      text: 'To tell you whether you got the court.',
+      fix: fixNotifications,
+    },
+    {
+      ok: setup.exactAlarms,
+      title: 'Alarms & reminders',
+      text: 'Wakes the phone at 23:50 to get ready.',
+      fix: () => Sniper.openSettings('exactAlarms'),
+    },
+    {
+      ok: setup.fullScreen,
+      title: 'Full-screen alarm',
+      text: 'Lets it ring over the lock screen if you must sign in.',
+      fix: () => Sniper.openSettings('fullScreen'),
+    },
+    {
+      ok: !setup.backgroundRestricted,
+      title: 'Battery not restricted',
+      text: 'A “Restricted” app can’t run at midnight. Use “Optimised” or “Unrestricted”.',
+      fix: () => Sniper.openSettings('app'),
+    },
+  ];
+
+  /** The whole midnight sequence on a 3-minute clock, without booking anything. */
+  const testRun = () => {
+    const nextMonday = mytDate(rollover);
     try {
-      const [statusRes, tasksRes] = await Promise.all([getStatus(), getTasks()]);
-      setStatus(statusRes);
-      setTasks(tasksRes);
+      Sniper.arm({
+        date: nextMonday,
+        start: '09:00',
+        end: '09:30',
+        court: '1',
+        anyCourt: false,
+        event: 'Sniper test',
+        pax: 1,
+        dryRun: true,
+        fireAt: Date.now() + 3 * 60_000,
+      });
+      reload();
+      Alert.alert(
+        'Test run started',
+        'In 3 minutes it goes through what happens at midnight — session check, clock, the shot — but books nothing. Lock the phone if you like; a notification tells you how it went.',
+      );
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Could not fetch sniper queue.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      Alert.alert('Could not start the test', err?.message || 'Something went wrong.');
     }
   };
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(() => {
-      fetchData(true);
-    }, 15000); // Poll status every 15s
-    return () => clearInterval(interval);
-  }, []);
-
-  // Live seconds countdown ticker
-  useEffect(() => {
-    if (!status?.rollover_timestamp) return;
-
-    const tick = () => {
-      const nowSec = Math.floor(Date.now() / 1000);
-      const diff = Math.max(0, status.rollover_timestamp - nowSec);
-
-      const days = Math.floor(diff / 86400);
-      const hours = Math.floor((diff % 86400) / 3600);
-      const mins = Math.floor((diff % 3600) / 60);
-      const secs = diff % 60;
-
-      if (days > 0) {
-        setCountdownStr(`${days}d ${hours.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`);
-      } else {
-        setCountdownStr(`${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
-      }
-    };
-
-    tick();
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [status?.rollover_timestamp]);
-
-  const handleCancelTask = (taskId: string) => {
-    Alert.alert('Cancel Sniper Task', 'Cancel this scheduled sniper booking?', [
-      { text: 'No' },
+  const cancel = (t: SniperTask) =>
+    Alert.alert('Cancel this snipe?', `${dayLabel(t.date)} ${t.start}–${t.end}, Court ${t.court}`, [
+      { text: 'Keep it' },
       {
-        text: 'Yes, Cancel',
+        text: 'Cancel snipe',
         style: 'destructive',
-        onPress: async () => {
-          try {
-            await cancelTask(taskId);
-            fetchData(true);
-          } catch (err: any) {
-            Alert.alert('Error', err?.message || 'Failed to cancel task');
-          }
+        onPress: () => {
+          Sniper.cancel(t.id);
+          reload();
         },
       },
     ]);
+
+  const remove = (t: SniperTask) => {
+    Sniper.remove(t.id);
+    reload();
   };
 
+  const visible = [...tasks].sort((a, b) =>
+    finished(a) === finished(b) ? b.fireAt - a.fireAt : finished(a) ? 1 : -1,
+  );
+
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <Text style={styles.title}>Rollover Auto-Sniper</Text>
-        <Text style={styles.subtitle}>Autonomous booking engine for next-week courts</Text>
+        <Text style={styles.title}>Rollover Sniper</Text>
+        <Text style={styles.subtitle}>Books next week’s court at the second it opens</Text>
       </View>
 
-      {/* Countdown Hero Banner */}
       <View style={styles.countdownCard}>
         <View style={styles.countdownRow}>
           <MaterialCommunityIcons name="target" size={28} color="#ef4444" />
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.countdownLabel}>NEXT WEEK ROLLOVER IN</Text>
-            <Text style={styles.countdownDigits}>{countdownStr}</Text>
+            <Text style={styles.countdownLabel}>NEXT WEEK OPENS IN</Text>
+            <Text style={styles.countdownDigits}>{countdown(rollover - now)}</Text>
           </View>
         </View>
-        <View style={styles.ruleBox}>
-          <Ionicons name="information-circle-outline" size={16} color="#94a3b8" />
-          <Text style={styles.ruleText}>
-            UMPoint unlocks next-week court reservations at strictly{' '}
-            <Text style={styles.ruleTextBold}>Monday 00:00:00 MYT</Text>. The bot wakes up automatically at rollover to reserve your slots.
-          </Text>
-        </View>
+        <Text style={styles.ruleText}>
+          UMPoint opens next week at <Text style={styles.ruleTextBold}>Monday 00:00:00 MYT</Text>. At 23:50 the phone
+          wakes, renews your session, checks UMPoint’s clock, and fires on the second. Leave it on the charger.
+        </Text>
       </View>
 
-      {/* Queue List Header */}
-      <View style={styles.queueHeader}>
-        <Text style={styles.queueTitle}>Scheduled Sniper Queue ({tasks.length})</Text>
-        <TouchableOpacity style={styles.newSnipeBtn} onPress={onNavigateToCourts}>
-          <Ionicons name="add" size={16} color="#ffffff" />
-          <Text style={styles.newSnipeBtnText}>Queue Court</Text>
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Ionicons name={ready ? 'shield-checkmark' : 'warning-outline'} size={18} color={ready ? '#10b981' : '#f59e0b'} />
+          <Text style={styles.cardTitle}>{ready ? 'Phone is ready' : 'Phone setup'}</Text>
+        </View>
+        {setupRows.map((row) => (
+          <TouchableOpacity key={row.title} style={styles.setupRow} onPress={row.fix} disabled={row.ok}>
+            <Ionicons
+              name={row.ok ? 'checkmark-circle' : 'alert-circle'}
+              size={20}
+              color={row.ok ? '#10b981' : '#f59e0b'}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.setupTitle}>{row.title}</Text>
+              {!row.ok && <Text style={styles.setupText}>{row.text}</Text>}
+            </View>
+            {!row.ok && <Text style={styles.fixText}>Fix</Text>}
+          </TouchableOpacity>
+        ))}
+        <TouchableOpacity style={styles.testBtn} onPress={testRun}>
+          <Ionicons name="flask-outline" size={16} color="#38bdf8" />
+          <Text style={styles.testBtnText}>Test run (books nothing)</Text>
         </TouchableOpacity>
       </View>
 
-      {loading && !refreshing ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#ef4444" />
+      <View style={styles.queueHeader}>
+        <Text style={styles.queueTitle}>Snipes</Text>
+        <TouchableOpacity style={styles.newSnipeBtn} onPress={onNavigateToCourts}>
+          <Ionicons name="add" size={16} color="#ffffff" />
+          <Text style={styles.newSnipeBtnText}>Pick a slot</Text>
+        </TouchableOpacity>
+      </View>
+
+      {visible.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <MaterialCommunityIcons name="timer-sand-empty" size={56} color="#334155" />
+          <Text style={styles.emptyTitle}>Nothing armed</Text>
+          <Text style={styles.emptySubtitle}>
+            On the Courts tab, switch to Next Week, tap a green slot and arm the sniper.
+          </Text>
         </View>
       ) : (
-        <ScrollView
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => fetchData(true)}
-              tintColor="#ef4444"
-            />
-          }
-        >
-          {tasks.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="timer-sand-empty" size={56} color="#334155" />
-              <Text style={styles.emptyTitle}>No Scheduled Snipes</Text>
-              <Text style={styles.emptySubtitle}>
-                Select any slot in Next Week from the Courts tab and choose "Queue for Mon 00:00 Rollover" to auto-book.
-              </Text>
-            </View>
-          ) : (
-            tasks.map((task) => {
-              const isWaiting = task.status === 'pending' || task.status === 'waiting_for_rollover';
-              const isCompleted = task.status === 'completed';
-              const isFailed = task.status === 'failed';
-              const isCancelled = task.status === 'cancelled';
-
-              return (
-                <View key={task.id} style={styles.taskCard}>
-                  <View style={styles.taskCardHeader}>
-                    <View style={styles.courtBadge}>
-                      <Text style={styles.courtBadgeText}>
-                        {task.court === 'any' ? 'Court 1-4 (Any)' : `Court ${task.court}`}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.taskStatusPill,
-                        isWaiting && styles.statusWaiting,
-                        isCompleted && styles.statusCompleted,
-                        (isFailed || isCancelled) && styles.statusFailed,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.taskStatusText,
-                          isWaiting && styles.statusTextWaiting,
-                          isCompleted && styles.statusTextCompleted,
-                          (isFailed || isCancelled) && styles.statusTextFailed,
-                        ]}
-                      >
-                        {task.status.replace(/_/g, ' ').toUpperCase()}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.taskEventName}>{task.event}</Text>
-
-                  <View style={styles.taskMetaRow}>
-                    <Ionicons name="calendar-outline" size={15} color="#94a3b8" />
-                    <Text style={styles.taskMetaText}>{task.date}</Text>
-                    <Text style={styles.taskMetaDot}>•</Text>
-                    <Ionicons name="time-outline" size={15} color="#94a3b8" />
-                    <Text style={styles.taskMetaText}>
-                      {task.start} – {task.end}
-                    </Text>
-                    <Text style={styles.taskMetaDot}>•</Text>
-                    <Ionicons name="people-outline" size={15} color="#94a3b8" />
-                    <Text style={styles.taskMetaText}>{task.pax} pax</Text>
-                  </View>
-
-                  {task.result?.message ? (
-                    <View style={styles.resultBox}>
-                      <Text style={styles.resultText}>{task.result.message}</Text>
-                    </View>
-                  ) : null}
-
-                  {isWaiting ? (
-                    <View style={styles.taskFooter}>
-                      <Text style={styles.taskTargetTime}>
-                        Fires at: {task.rollover_time} MYT
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.taskCancelBtn}
-                        onPress={() => handleCancelTask(task.id)}
-                      >
-                        <Text style={styles.taskCancelBtnText}>Cancel</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
+        visible.map((t) => {
+          const st = STATUS[t.status] ?? STATUS.failed;
+          return (
+            <View key={t.id} style={styles.taskCard}>
+              <View style={styles.taskCardHeader}>
+                <Text style={styles.courtBadgeText}>
+                  {t.dryRun ? 'Test run' : `Court ${t.bookedCourt ?? t.court}${t.anyCourt && !t.bookedCourt ? ' or any' : ''}`}
+                </Text>
+                <View style={[styles.statusPill, { borderColor: st.color, backgroundColor: st.color + '1f' }]}>
+                  <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
                 </View>
-              );
-            })
-          )}
-        </ScrollView>
+              </View>
+              <Text style={styles.taskSlot}>
+                {dayLabel(t.date)} · {t.start}–{t.end}
+              </Text>
+              <Text style={styles.taskMeta}>
+                {t.event} · {t.pax} pax · fires {fireLabel(t)}
+              </Text>
+              {t.message ? <Text style={styles.resultText}>{t.message}</Text> : null}
+              <View style={styles.taskFooter}>
+                {t.status === 'armed' ? (
+                  <TouchableOpacity onPress={() => cancel(t)}>
+                    <Text style={styles.taskCancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                ) : finished(t) ? (
+                  <TouchableOpacity onPress={() => remove(t)}>
+                    <Text style={styles.taskRemoveText}>Remove</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          );
+        })
       )}
-    </View>
+    </ScrollView>
   );
 };
 
@@ -234,10 +257,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#090d16',
   },
+  content: {
+    padding: 16,
+    paddingBottom: 40,
+    gap: 14,
+  },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: 4,
   },
   title: {
     color: '#f8fafc',
@@ -250,42 +276,31 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   countdownCard: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    backgroundColor: '#171328',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#371e44',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    gap: 12,
   },
   countdownRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   countdownLabel: {
-    color: '#f87171',
+    color: '#fca5a5',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   countdownDigits: {
-    color: '#ffffff',
-    fontSize: 26,
-    fontWeight: '900',
+    color: '#f8fafc',
+    fontSize: 28,
+    fontWeight: '800',
     marginTop: 2,
     fontVariant: ['tabular-nums'],
   },
-  ruleBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 12,
-    gap: 8,
-  },
   ruleText: {
-    flex: 1,
     color: '#94a3b8',
     fontSize: 12,
     lineHeight: 18,
@@ -294,69 +309,111 @@ const styles = StyleSheet.create({
     color: '#f8fafc',
     fontWeight: '700',
   },
+  card: {
+    backgroundColor: '#131b2e',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  cardTitle: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  setupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  setupTitle: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  setupText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  fixText: {
+    color: '#f59e0b',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  testBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+  },
+  testBtnText: {
+    color: '#38bdf8',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   queueHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 8,
+    marginTop: 4,
   },
   queueTitle: {
-    color: '#e2e8f0',
-    fontSize: 15,
+    color: '#f8fafc',
+    fontSize: 16,
     fontWeight: '700',
   },
   newSnipeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#dc2626',
+    gap: 4,
+    backgroundColor: '#ef4444',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    gap: 4,
   },
   newSnipeBtnText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  list: {
-    flex: 1,
-  },
-  listContent: {
-    padding: 16,
-    paddingBottom: 40,
-    gap: 12,
   },
   emptyContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 40,
+    marginTop: 24,
     paddingHorizontal: 32,
   },
   emptyTitle: {
-    color: '#cbd5e1',
-    fontSize: 17,
+    color: '#e2e8f0',
+    fontSize: 16,
     fontWeight: '700',
-    marginTop: 16,
+    marginTop: 12,
   },
   emptySubtitle: {
     color: '#64748b',
     fontSize: 13,
     textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
+    marginTop: 6,
+    lineHeight: 19,
   },
   taskCard: {
     backgroundColor: '#131b2e',
     borderRadius: 14,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#1e293b',
   },
@@ -365,95 +422,54 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  courtBadge: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
   courtBadgeText: {
-    color: '#38bdf8',
-    fontSize: 12,
+    color: '#e2e8f0',
+    fontSize: 13,
     fontWeight: '700',
   },
-  taskStatusPill: {
+  statusPill: {
+    borderWidth: 1,
+    borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingVertical: 3,
   },
-  statusWaiting: {
-    backgroundColor: '#7f1d1d',
-  },
-  statusCompleted: {
-    backgroundColor: '#064e3b',
-  },
-  statusFailed: {
-    backgroundColor: '#334155',
-  },
-  taskStatusText: {
+  statusText: {
     fontSize: 10,
     fontWeight: '800',
   },
-  statusTextWaiting: {
-    color: '#fca5a5',
-  },
-  statusTextCompleted: {
-    color: '#34d399',
-  },
-  statusTextFailed: {
-    color: '#94a3b8',
-  },
-  taskEventName: {
+  taskSlot: {
     color: '#f8fafc',
     fontSize: 16,
     fontWeight: '700',
     marginTop: 8,
   },
-  taskMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    gap: 6,
-  },
-  taskMetaText: {
+  taskMeta: {
     color: '#94a3b8',
-    fontSize: 13,
-  },
-  taskMetaDot: {
-    color: '#475569',
-  },
-  resultBox: {
-    marginTop: 10,
-    padding: 8,
-    borderRadius: 6,
-    backgroundColor: '#0f172a',
+    fontSize: 12,
+    marginTop: 4,
   },
   resultText: {
     color: '#cbd5e1',
     fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#0f172a',
   },
   taskFooter: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-  },
-  taskTargetTime: {
-    color: '#64748b',
-    fontSize: 11,
-  },
-  taskCancelBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderRadius: 6,
+    justifyContent: 'flex-end',
+    marginTop: 8,
   },
   taskCancelBtnText: {
     color: '#ef4444',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
+  },
+  taskRemoveText: {
+    color: '#64748b',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

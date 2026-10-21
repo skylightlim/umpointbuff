@@ -170,11 +170,11 @@ class UmpointHttp(private val ctx: Context) {
     )
   }
 
+  /** Signing out forgets Google too; otherwise the quiet renewal would sign straight back in. */
   fun clearSession() {
-    // Expire UMPoint's cookies only; the Google cookies stay so signing back in is one tap.
-    for (name in listOf("PHPSESSID", "cookiesession1")) {
-      cookies.setCookie(Umpoint.BASE, "$name=; Max-Age=0; Path=/")
-    }
+    val done = CountDownLatch(1)
+    Handler(Looper.getMainLooper()).post { cookies.removeAllCookies { done.countDown() } }
+    done.await(5, TimeUnit.SECONDS)
     cookies.flush()
   }
 }

@@ -66,6 +66,7 @@ declare class UmpointSniperModule extends NativeModule {
   permissions(): PhoneSetup;
   openSettings(which: 'notifications' | 'exactAlarms' | 'fullScreen' | 'app'): void;
   bookNow(json: string): Promise<string>;
+  renewSession(): Promise<'alive' | 'renewed' | 'needs_sign_in'>;
   clearSession(): Promise<void>;
   flushCookies(): void;
   readLog(): string;
@@ -84,6 +85,7 @@ export const Sniper = {
   phoneSetup: () => Native.permissions(),
   openSettings: (which: Parameters<UmpointSniperModule['openSettings']>[0]) => Native.openSettings(which),
   bookNow: async (req: SlotRequest): Promise<BookResult> => JSON.parse(await Native.bookNow(JSON.stringify(req))),
+  renewSession: () => Native.renewSession(),
   clearSession: () => Native.clearSession(),
   flushCookies: () => Native.flushCookies(),
   readLog: () => Native.readLog(),

@@ -1,0 +1,92 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:1:1-30:12
+INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:1:1-30:12
+	package
+		INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.INTERNET
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:2:3-65
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:2:20-62
+uses-permission#android.permission.USE_EXACT_ALARM
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:4:3-72
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:4:20-69
+uses-permission#android.permission.SCHEDULE_EXACT_ALARM
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:5:3-104
+	android:maxSdkVersion
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:5:75-101
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:5:20-74
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:6:3-79
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:6:20-76
+uses-permission#android.permission.WAKE_LOCK
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:7:3-66
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:7:20-63
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:8:3-75
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:8:20-72
+uses-permission#android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:9:3-91
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:9:20-88
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:10:3-75
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:10:20-72
+uses-permission#android.permission.USE_FULL_SCREEN_INTENT
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:11:3-79
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:11:20-76
+uses-permission#android.permission.VIBRATE
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:12:3-64
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:12:20-61
+application
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:14:3-29:17
+receiver#expo.modules.umpointsniper.SniperReceiver
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:15:5-22:16
+	android:exported
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:15:46-70
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:15:15-45
+intent-filter#action:name:android.intent.action.BOOT_COMPLETED+action:name:android.intent.action.MY_PACKAGE_REPLACED+action:name:android.intent.action.TIMEZONE_CHANGED+action:name:android.intent.action.TIME_SET
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:16:7-21:23
+action#android.intent.action.BOOT_COMPLETED
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:17:9-71
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:17:17-68
+action#android.intent.action.TIME_SET
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:18:9-65
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:18:17-62
+action#android.intent.action.TIMEZONE_CHANGED
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:19:9-73
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:19:17-70
+action#android.intent.action.MY_PACKAGE_REPLACED
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:20:9-76
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:20:17-73
+service#expo.modules.umpointsniper.SniperService
+ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:25:5-28:56
+	android:exported
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:27:7-31
+	android:foregroundServiceType
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:28:7-53
+	android:name
+		ADDED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml:26:7-36
+uses-sdk
+INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml
+INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/skylightlim/Projects/umpoint-mobile/modules/umpoint-sniper/android/src/main/AndroidManifest.xml
