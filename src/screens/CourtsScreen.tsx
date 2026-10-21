@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { bookCourt, getGrid, scheduleSnipe } from '../services/api';
-import { CLOSING_TIME, dayLabel, minutes, mytDate } from '../services/umpointClient';
+import { CLOSING_TIME, dateMs, dayLabel, isWeekday, minutes, mytDate, mytMinutesNow } from '../services/umpointClient';
 import { CourtId, GridResponse, WeekType } from '../types';
 
 interface Props {
@@ -34,7 +34,7 @@ const DURATIONS = [
 export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateToBookings }) => {
   const [selectedWeek, setSelectedWeek] = useState<WeekType>('this');
   const [selectedCourt, setSelectedCourt] = useState<CourtId>('1');
-  const [selectedDateIndex, setSelectedDateIndex] = useState<number>(0);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [gridData, setGridData] = useState<GridResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +76,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
     if (week === selectedWeek) return;
     setLoading(true);
     setSelectedWeek(week);
-    setSelectedDateIndex(0);
+    setSelectedDate(null);
   };
 
   const pickCourt = (court: CourtId) => {
@@ -85,26 +85,28 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
     setSelectedCourt(court);
   };
 
+  // Only days you can still book: weekdays (weekends are closed) from today on.
+  const today = mytDate();
   const dates = gridData?.dates || [];
-  const currentDateStr = dates[selectedDateIndex] || '';
+  const days = dates.filter((d) => isWeekday(d) && dateMs(d) >= dateMs(today));
+  const currentDateStr = selectedDate && days.includes(selectedDate) ? selectedDate : days[0] || '';
+  const column = dates.indexOf(currentDateStr);
 
   // The 19:00 row UMPoint draws can't be booked: courts close at 19:00.
-  const daySlots = useMemo(() => {
-    if (!gridData) return [];
-    return gridData.slots
-      .filter((slot) => minutes(slot.time_start) < minutes(CLOSING_TIME))
-      .map((slot, index) => {
-        const cell = slot.cells[selectedDateIndex];
-        return {
-          index,
-          time_start: slot.time_start,
-          time_end: slot.time_end,
-          status: cell?.status || 'unavailable',
-        };
-      });
-  }, [gridData, selectedDateIndex]);
+  const daySlots = (gridData?.slots ?? [])
+    .filter((slot) => minutes(slot.time_start) < minutes(CLOSING_TIME))
+    .map((slot, index) => {
+      const cell = slot.cells[column];
+      const passed = currentDateStr === today && minutes(slot.time_start) <= mytMinutesNow();
+      return {
+        index,
+        time_start: slot.time_start,
+        time_end: slot.time_end,
+        status: passed ? ('passed' as const) : cell?.status || 'unavailable',
+      };
+    });
 
-  const selectedRange = useMemo(() => {
+  const selectedRange = (() => {
     if (selectedSlotIndex === null || !daySlots[selectedSlotIndex]) return null;
     const endIndex = selectedSlotIndex + slotDuration - 1;
     if (endIndex >= daySlots.length) return null;
@@ -115,12 +117,16 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
       // A snipe targets next week, where every slot looks free until someone takes it at 00:00.
       isValid: span.every((s) => s.status === 'free'),
     };
-  }, [selectedSlotIndex, slotDuration, daySlots]);
+  })();
 
   const handleSelectSlot = (idx: number) => {
     const slot = daySlots[idx];
     if (slot.status !== 'free') {
-      const what = slot.status === 'mine' ? 'already yours' : slot.status === 'closed' ? 'closed' : 'taken';
+      const what =
+        slot.status === 'mine' ? 'already yours'
+        : slot.status === 'passed' ? 'already over'
+        : slot.status === 'closed' ? 'closed'
+        : 'taken';
       Alert.alert('Slot not free', `This slot is ${what}. Pick a green one.`);
       return;
     }
@@ -240,29 +246,25 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
       {/* Day Selector Tabs */}
       <View style={styles.daysScrollContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysScroll}>
-          {dates.map((dateStr, idx) => {
-            const isSelected = selectedDateIndex === idx;
-            const parts = dateStr.split('-');
-            const dayNum = parts[0];
-            const monthNum = parts[1];
-            const isWeekend = idx >= 5;
+          {days.map((dateStr) => {
+            const isSelected = currentDateStr === dateStr;
+            const [dayNum, monthNum] = dateStr.split('-');
 
             return (
               <TouchableOpacity
                 key={dateStr}
-                style={[styles.dayTab, isSelected && styles.dayTabActive, isWeekend && styles.dayTabWeekend]}
+                style={[styles.dayTab, isSelected && styles.dayTabActive]}
                 onPress={() => {
-                  setSelectedDateIndex(idx);
+                  setSelectedDate(dateStr);
                   setSelectedSlotIndex(null);
                 }}
               >
                 <Text style={[styles.dayTabLabel, isSelected && styles.dayTabLabelActive]}>
-                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][idx]}
+                  {dateStr === today ? 'Today' : dayLabel(dateStr).split(' ')[0]}
                 </Text>
                 <Text style={[styles.dayTabDate, isSelected && styles.dayTabDateActive]}>
                   {dayNum}/{monthNum}
                 </Text>
-                {isWeekend && <Text style={styles.weekendTag}>Closed</Text>}
               </TouchableOpacity>
             );
           })}
@@ -283,11 +285,19 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
             <Text style={styles.retryText}>Try again</Text>
           </TouchableOpacity>
         </View>
+      ) : gridData && days.length === 0 ? (
+        <View style={styles.centerContainer}>
+          <Ionicons name="calendar-outline" size={48} color="#334155" />
+          <Text style={styles.loadingText}>No weekdays left this week.</Text>
+          <TouchableOpacity onPress={() => pickWeek('next')} style={styles.retryBtn}>
+            <Text style={styles.retryText}>See next week</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView style={styles.slotList} contentContainerStyle={styles.slotListContent}>
           <View style={styles.slotListHeader}>
             <Text style={styles.slotListTitle}>
-              Gelanggang Badminton {selectedCourt} • {currentDateStr}
+              Court {selectedCourt} • {currentDateStr ? dayLabel(currentDateStr) : ''}
             </Text>
             <TouchableOpacity onPress={refresh} accessibilityLabel="Refresh">
               <Ionicons name="refresh" size={18} color="#10b981" />
@@ -298,7 +308,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
             const isFree = slot.status === 'free';
             const isPending = slot.status === 'mine';
             const isBooked = slot.status === 'taken';
-            const isClosed = slot.status === 'closed' || slot.status === 'unavailable';
+            const isClosed = slot.status === 'closed' || slot.status === 'unavailable' || slot.status === 'passed';
 
             return (
               <TouchableOpacity
@@ -635,9 +645,6 @@ const styles = StyleSheet.create({
   dayTabActive: {
     backgroundColor: '#2563eb',
   },
-  dayTabWeekend: {
-    opacity: 0.6,
-  },
   dayTabLabel: {
     color: '#94a3b8',
     fontSize: 11,
@@ -655,12 +662,6 @@ const styles = StyleSheet.create({
   },
   dayTabDateActive: {
     color: '#ffffff',
-  },
-  weekendTag: {
-    color: '#ef4444',
-    fontSize: 9,
-    fontWeight: '700',
-    marginTop: 2,
   },
   centerContainer: {
     flex: 1,

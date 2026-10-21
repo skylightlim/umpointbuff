@@ -60,6 +60,17 @@ export function hhmm(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 }
 
+/** Minutes since 00:00 MYT right now. */
+export function mytMinutesNow(now: number = Date.now()): number {
+  return Math.floor(((now + MYT_OFFSET_MS) % DAY_MS) / 60_000);
+}
+
+/** Courts are closed on Saturday and Sunday. */
+export function isWeekday(date: string): boolean {
+  const dow = new Date(dateMs(date) + MYT_OFFSET_MS).getUTCDay();
+  return dow >= 1 && dow <= 5;
+}
+
 /** "Mon 26 Oct" for a DD-MM-YYYY date. */
 export function dayLabel(date: string): string {
   const d = new Date(dateMs(date) + MYT_OFFSET_MS);
