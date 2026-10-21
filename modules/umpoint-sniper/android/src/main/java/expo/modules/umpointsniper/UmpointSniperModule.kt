@@ -32,6 +32,10 @@ class UmpointSniperModule : Module() {
       val now = System.currentTimeMillis()
       val fireAt = if (o.has("fireAt")) o.getLong("fireAt") else Umpoint.rolloverFor(o.getString("date"))
       require(fireAt > now + 15_000) { "That week is already open — book it directly instead." }
+      // No same-day bookings on UMPoint, and a week opens on its Monday: that Monday can't be sniped.
+      require(o.optBoolean("dryRun") || Umpoint.mytDate(fireAt) != o.getString("date")) {
+        "UMPoint doesn't take same-day bookings, so a week's Monday can't be sniped. Pick Tuesday to Friday."
+      }
       val task = Task.fromJson(
         o.put("id", UUID.randomUUID().toString().take(8)).put("fireAt", fireAt).put("createdAt", now).put("status", "armed"),
       )

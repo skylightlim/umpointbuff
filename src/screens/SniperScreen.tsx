@@ -106,10 +106,10 @@ export const SniperScreen: React.FC<Props> = ({ onNavigateToCourts }) => {
 
   /** The whole midnight sequence on a 3-minute clock, without booking anything. */
   const testRun = () => {
-    const nextMonday = mytDate(rollover);
+    const nextTuesday = mytDate(rollover + 86_400_000);
     try {
       Sniper.arm({
-        date: nextMonday,
+        date: nextTuesday,
         start: '09:00',
         end: '09:30',
         court: '1',
@@ -210,7 +210,7 @@ export const SniperScreen: React.FC<Props> = ({ onNavigateToCourts }) => {
           <MaterialCommunityIcons name="timer-sand-empty" size={56} color="#334155" />
           <Text style={styles.emptyTitle}>Nothing armed</Text>
           <Text style={styles.emptySubtitle}>
-            On the Courts tab, switch to Next Week, tap a green slot and arm the sniper.
+            On the Courts tab, switch to Next Week, pick Tuesday–Friday, tap a green slot and arm the sniper.
           </Text>
         </View>
       ) : (

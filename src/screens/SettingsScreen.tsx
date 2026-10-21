@@ -84,6 +84,9 @@ export const SettingsScreen: React.FC = () => {
         <Bullet bold="Opening:">
           Next week opens at Monday 00:00:00 MYT — next on {dayLabel(mytDate(nextRolloverMs()))}.
         </Bullet>
+        <Bullet bold="A day ahead:">
+          no same-day bookings. That Monday is same-day when its week opens, so the sniper targets Tuesday–Friday.
+        </Bullet>
         <Bullet bold="Cancelling:">done on UMPoint’s own page (Bookings tab), so it works exactly as the site does.</Bullet>
       </View>
 

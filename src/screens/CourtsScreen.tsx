@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { bookCourt, getGrid, scheduleSnipe } from '../services/api';
-import { CLOSING_TIME, dateMs, dayLabel, isWeekday, minutes, mytDate, mytMinutesNow } from '../services/umpointClient';
+import { CLOSING_TIME, dateMs, dayLabel, isWeekday, minutes, mytDate, nextRolloverMs } from '../services/umpointClient';
 import { CourtId, GridResponse, WeekType } from '../types';
 
 interface Props {
@@ -85,10 +85,12 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
     setSelectedCourt(court);
   };
 
-  // Only days you can still book: weekdays (weekends are closed) from today on.
+  // Only days UMPoint will still take: weekdays (weekends are closed), booked at least a day
+  // ahead. Next week opens at its Monday 00:00, which makes that Monday same-day — so Tue–Fri.
   const today = mytDate();
   const dates = gridData?.dates || [];
-  const days = dates.filter((d) => isWeekday(d) && dateMs(d) >= dateMs(today));
+  const earliest = (selectedWeek === 'this' ? dateMs(today) : nextRolloverMs()) + 86_400_000;
+  const days = dates.filter((d) => isWeekday(d) && dateMs(d) >= earliest);
   const currentDateStr = selectedDate && days.includes(selectedDate) ? selectedDate : days[0] || '';
   const column = dates.indexOf(currentDateStr);
 
@@ -97,12 +99,11 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
     .filter((slot) => minutes(slot.time_start) < minutes(CLOSING_TIME))
     .map((slot, index) => {
       const cell = slot.cells[column];
-      const passed = currentDateStr === today && minutes(slot.time_start) <= mytMinutesNow();
       return {
         index,
         time_start: slot.time_start,
         time_end: slot.time_end,
-        status: passed ? ('passed' as const) : cell?.status || 'unavailable',
+        status: cell?.status || 'unavailable',
       };
     });
 
@@ -122,11 +123,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
   const handleSelectSlot = (idx: number) => {
     const slot = daySlots[idx];
     if (slot.status !== 'free') {
-      const what =
-        slot.status === 'mine' ? 'already yours'
-        : slot.status === 'passed' ? 'already over'
-        : slot.status === 'closed' ? 'closed'
-        : 'taken';
+      const what = slot.status === 'mine' ? 'already yours' : slot.status === 'closed' ? 'closed' : 'taken';
       Alert.alert('Slot not free', `This slot is ${what}. Pick a green one.`);
       return;
     }
@@ -260,7 +257,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
                 }}
               >
                 <Text style={[styles.dayTabLabel, isSelected && styles.dayTabLabelActive]}>
-                  {dateStr === today ? 'Today' : dayLabel(dateStr).split(' ')[0]}
+                  {dayLabel(dateStr).split(' ')[0]}
                 </Text>
                 <Text style={[styles.dayTabDate, isSelected && styles.dayTabDateActive]}>
                   {dayNum}/{monthNum}
@@ -288,7 +285,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
       ) : gridData && days.length === 0 ? (
         <View style={styles.centerContainer}>
           <Ionicons name="calendar-outline" size={48} color="#334155" />
-          <Text style={styles.loadingText}>No weekdays left this week.</Text>
+          <Text style={styles.loadingText}>Nothing left to book this week (book at least a day ahead).</Text>
           <TouchableOpacity onPress={() => pickWeek('next')} style={styles.retryBtn}>
             <Text style={styles.retryText}>See next week</Text>
           </TouchableOpacity>
@@ -308,7 +305,7 @@ export const CourtsScreen: React.FC<Props> = ({ onNavigateToSniper, onNavigateTo
             const isFree = slot.status === 'free';
             const isPending = slot.status === 'mine';
             const isBooked = slot.status === 'taken';
-            const isClosed = slot.status === 'closed' || slot.status === 'unavailable' || slot.status === 'passed';
+            const isClosed = slot.status === 'closed' || slot.status === 'unavailable';
 
             return (
               <TouchableOpacity
