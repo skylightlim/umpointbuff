@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="expo.modules.umpointsniper.UmpointTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-21T16:59:06.722Z" hostname="skylightlim" time="0.133">
+  <properties/>
+  <testcase name="rolloverIsMondayMidnightMyt" classname="expo.modules.umpointsniper.UmpointTest" time="0.011"/>
+  <testcase name="multipartHasEmptyFileParts" classname="expo.modules.umpointsniper.UmpointTest" time="0.018"/>
+  <testcase name="builtCellIdsMatchUmpointsIds" classname="expo.modules.umpointsniper.UmpointTest" time="0.037"/>
+  <testcase name="parsesTheSyntheticGrid" classname="expo.modules.umpointsniper.UmpointTest" time="0.009"/>
+  <testcase name="bookingFieldsMatchTheBrowserForm" classname="expo.modules.umpointsniper.UmpointTest" time="0.004"/>
+  <testcase name="realPagesParse" classname="expo.modules.umpointsniper.UmpointTest" time="0.049"/>
+  <system-out><![CDATA[grid_this.html: 19-10-2026..25-10-2026, 55 free, person set=true, initdate=22-10-2026
+grid_next.html: 26-10-2026..01-11-2026, 105 free, person set=true, initdate=22-10-2026
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
