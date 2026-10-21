@@ -88,8 +88,12 @@ class UmpointHttp(private val ctx: Context) {
     null
   }
 
-  /** The "UM Staff and Student" Google OAuth link from the login page. */
-  fun oauthUrl(): String? = runCatching {
+  /** Whether the sign-in sheet left a Google session behind; without one, renewing can't work. */
+  fun hasGoogleSession(): Boolean =
+    Regex("(^|; )(SID|__Secure-1PSID)=").containsMatchIn(cookies.getCookie("https://accounts.google.com") ?: "")
+
+  /** The "UM Staff and Student" Google OAuth link from the login page (null without a Google session). */
+  fun oauthUrl(): String? = if (!hasGoogleSession()) null else runCatching {
     val r = request("${Umpoint.BASE}/login/")
     Regex("href=\"(https://accounts\\.google\\.com/o/oauth2/auth[^\"]+)\"").find(r.body)
       ?.groupValues?.get(1)?.replace("&amp;", "&")
@@ -119,7 +123,7 @@ class UmpointHttp(private val ctx: Context) {
 
   /** Same as [renewByRedirects] but in an off-screen WebView, for when Google wants JavaScript. */
   @SuppressLint("SetJavaScriptEnabled")
-  fun renewInWebView(oauth: String, timeoutMs: Long = 45_000): Boolean {
+  fun renewInWebView(oauth: String, timeoutMs: Long = 30_000): Boolean {
     val done = CountDownLatch(1)
     val main = Handler(Looper.getMainLooper())
     var web: WebView? = null
