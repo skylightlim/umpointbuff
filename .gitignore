@@ -42,3 +42,4 @@ yarn-error.*
 
 # local Expo module build output
 modules/*/android/build/
+thingstodo.md
