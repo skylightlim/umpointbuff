@@ -23,7 +23,9 @@ class Rollover(private val svc: SniperService, private val fireAt: Long, private
   private val ctx = svc.applicationContext
   private val http = UmpointHttp(ctx)
   private val booker = Booker(ctx, http, ::log)
-  private val weekTs = fireAt / 1000
+  /** The target week's Monday 00:00 MYT in seconds; equals fireAt for a real snipe, not for a test run. */
+  private fun weekOf(task: Task) = Umpoint.rolloverFor(task.date) / 1000
+  private val weekTs = weekOf(tasks.first())
   private val studyName = "rollover-" + Umpoint.mytDate(fireAt)
   private var offsetLow = Long.MIN_VALUE
   private var offsetHigh = Long.MAX_VALUE
@@ -150,7 +152,7 @@ class Rollover(private val svc: SniperService, private val fireAt: Long, private
       val courts = if (task.anyCourt) listOf("1", "2", "3", "4") else listOf(task.court)
       for (court in courts) {
         runCatching {
-          val g = http.grid(court, weekTs, "n", today)
+          val g = http.grid(court, weekOf(task), "n", today)
           if (booker.person == null) booker.person = g.person
           log("before: court $court ${task.date} ${task.start}-${task.end} = ${g.states(task.date, task.start, task.end)}")
         }.onFailure { log("before: court $court grid failed: $it") }
@@ -160,17 +162,17 @@ class Rollover(private val svc: SniperService, private val fireAt: Long, private
 
   private fun fire(task: Task) {
     if (task.dryRun) {
-      val fields = Umpoint.bookingFields(task, task.court, weekTs, Umpoint.mytDate(serverNow()))
+      val fields = Umpoint.bookingFields(task, task.court, weekOf(task), Umpoint.mytDate(serverNow()))
       log("dry run at ${fmt(serverNow())}: would send ${fields.filter { it.second != null && it.first in setOf("sdbook", "stbook", "etbook", "spid", "tweek", "initdate", "stdateselected", "eddateselected") }}")
       svc.finish(task, "dry_run", "Test run OK: it would have fired at ${fmt(serverNow())}. Nothing was booked.")
       return
     }
     log("firing ${task.date} ${task.start}-${task.end} court ${task.court}${if (task.anyCourt) " (any court)" else ""} at ${fmt(serverNow())}")
     val result = try {
-      booker.book(task, weekTs, fireAt + OPEN_RETRY_MS)
+      booker.book(task, weekOf(task), fireAt + OPEN_RETRY_MS)
     } catch (e: SessionExpired) {
       log("session expired while firing")
-      if (ensureSession(fireAt + LATE_MS)) booker.book(task, weekTs, fireAt + OPEN_RETRY_MS)
+      if (ensureSession(fireAt + LATE_MS)) booker.book(task, weekOf(task), fireAt + OPEN_RETRY_MS)
       else Booker.Result("failed", "The UMPoint session ended at 00:00.", null)
     }
     log("result: ${result.status} ${result.message} at ${fmt(serverNow())}")
