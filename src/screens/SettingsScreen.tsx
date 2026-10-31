@@ -6,9 +6,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Sniper } from '../../modules/umpoint-sniper';
 import { BookingPrefs, DEFAULT_PREFS, loadPrefs, savePrefs } from '../services/cache';
 import { requestSignIn, signOut, useSession } from '../services/session';
-import { Card, Hairline, Press, SectionTitle, Txt } from '../ui';
-import { ScreenHeader } from '../components/Pieces';
-import { radius, space, useColors } from '../theme';
+import { Button, Card, Hairline, IconButton, Press, SectionTitle, Txt } from '../ui';
+import { ScreenHeader, TAB_CLEARANCE } from '../components/Pieces';
+import { elevation, shape, space, useColors } from '../theme';
 
 export const SettingsScreen: React.FC = () => {
   const c = useColors();
@@ -30,7 +30,7 @@ export const SettingsScreen: React.FC = () => {
   const handleSignOut = () =>
     Alert.alert(
       'Sign out?',
-      'This also forgets your Google sign-in in the app, so armed snipes can’t renew your session until you sign in again.',
+      'This forgets your Google sign-in session in the app. Armed snipes will not be able to renew credentials at midnight until you sign in again.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
@@ -41,63 +41,78 @@ export const SettingsScreen: React.FC = () => {
     session === 'signed_in' ? 'Signed in' : session === 'signed_out' ? 'Not signed in' : session === 'offline' ? 'Can’t reach UMPoint' : 'Checking…';
 
   return (
-    <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView style={{ backgroundColor: c.surface }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <ScreenHeader title="Settings" />
 
+      {/* Account Section */}
       <View style={styles.section}>
         <SectionTitle>UMPoint account</SectionTitle>
-        <Card style={styles.list}>
+        <Card
+          style={[
+            styles.list,
+            {
+              backgroundColor: c.surfaceContainerLow,
+              borderColor: c.outlineVariant,
+              borderWidth: 1,
+              elevation: elevation.level1,
+            },
+          ]}
+        >
           <View style={styles.row}>
-            <View style={[styles.dot, { backgroundColor: signedIn ? c.mat : c.cork }]} />
-            <Txt variant="headline" style={styles.flex}>
+            <View style={[styles.dot, { backgroundColor: signedIn ? c.secondary : c.tertiary }]} />
+            <Txt variant="titleMedium" color={c.onSurface} style={styles.flex}>
               {statusText}
             </Txt>
             {signedIn ? (
-              <Press onPress={handleSignOut}>
-                <Txt variant="callout" color={c.smash} style={{ fontWeight: '600' }}>
-                  Sign out
-                </Txt>
-              </Press>
+              <Button label="Sign out" tone="danger" size="m" onPress={handleSignOut} />
             ) : (
-              <Press onPress={() => requestSignIn()}>
-                <Txt variant="callout" color={c.mat} style={{ fontWeight: '700' }}>
-                  Sign in
-                </Txt>
-              </Press>
+              <Button label="Sign in" tone="filled" size="m" onPress={() => requestSignIn()} />
             )}
           </View>
         </Card>
-        <Txt variant="footnote" color={c.ink3} style={styles.footnote}>
-          UMPoint ends a session after 10–20 idle minutes. The app signs you back in on its own; you only sign in
-          again when Google asks.
+        <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.footnote}>
+          UMPoint sessions expire after 10–20 idle minutes. The app automatically refreshes credentials using Google OAuth.
         </Txt>
       </View>
 
+      {/* Booking Defaults Section */}
       <View style={styles.section}>
-        <SectionTitle>Every booking uses</SectionTitle>
-        <Card style={styles.list}>
+        <SectionTitle>Booking defaults</SectionTitle>
+        <Card
+          style={[
+            styles.list,
+            {
+              backgroundColor: c.surfaceContainerLow,
+              borderColor: c.outlineVariant,
+              borderWidth: 1,
+              elevation: elevation.level1,
+            },
+          ]}
+        >
           <View style={styles.row}>
-            <Txt variant="body" color={c.ink2} style={styles.label}>
+            <Txt variant="bodyMedium" color={c.onSurfaceVariant} style={styles.label}>
               Event
             </Txt>
             <TextInput
               value={prefs.event}
               onChangeText={(event) => update({ ...prefs, event })}
               onEndEditing={() => !prefs.event.trim() && update({ ...prefs, event: DEFAULT_PREFS.event })}
-              style={[styles.input, { color: c.ink }]}
+              style={[styles.input, { color: c.onSurface }]}
               placeholder={DEFAULT_PREFS.event}
-              placeholderTextColor={c.ink3}
+              placeholderTextColor={c.outline}
               returnKeyType="done"
-              accessibilityLabel="Event name"
+              accessibilityLabel="Default event name"
             />
           </View>
+
           <Hairline inset={space.l} />
+
           <View style={styles.row}>
-            <Txt variant="body" color={c.ink2} style={styles.label}>
+            <Txt variant="bodyMedium" color={c.onSurfaceVariant} style={styles.label}>
               Players
             </Txt>
             <View style={styles.flex} />
-            <View style={[styles.stepper, { backgroundColor: c.fill }]}>
+            <View style={[styles.stepper, { backgroundColor: c.surfaceContainerHighest }]}>
               <Press
                 onPress={() => update({ ...prefs, pax: Math.max(1, prefs.pax - 1) })}
                 disabled={prefs.pax <= 1}
@@ -105,9 +120,9 @@ export const SettingsScreen: React.FC = () => {
                 style={styles.stepButton}
                 accessibilityLabel="Fewer players"
               >
-                <Ionicons name="remove" size={18} color={prefs.pax <= 1 ? c.ink3 : c.ink} />
+                <Ionicons name="remove" size={18} color={prefs.pax <= 1 ? c.outline : c.onSurface} />
               </Press>
-              <Txt variant="time" style={styles.stepValue}>
+              <Txt variant="titleMedium" color={c.onSurface} style={styles.stepValue}>
                 {prefs.pax}
               </Txt>
               <Press
@@ -116,42 +131,52 @@ export const SettingsScreen: React.FC = () => {
                 style={styles.stepButton}
                 accessibilityLabel="More players"
               >
-                <Ionicons name="add" size={18} color={c.ink} />
+                <Ionicons name="add" size={18} color={c.onSurface} />
               </Press>
             </View>
           </View>
         </Card>
-        <Txt variant="footnote" color={c.ink3} style={styles.footnote}>
-          UMPoint asks for an event name and a head count with every booking.
+        <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.footnote}>
+          Applied automatically to every manual booking and sniper attempt.
         </Txt>
       </View>
 
+      {/* Diagnostics / Help Section */}
       <View style={styles.section}>
-        <SectionTitle>Help</SectionTitle>
-        <Card style={styles.list}>
+        <SectionTitle>Diagnostics</SectionTitle>
+        <Card
+          style={[
+            styles.list,
+            {
+              backgroundColor: c.surfaceContainerLow,
+              borderColor: c.outlineVariant,
+              borderWidth: 1,
+              elevation: elevation.level1,
+            },
+          ]}
+        >
           <Press onPress={() => setLog(Sniper.readLog() || 'Nothing logged yet.')} style={styles.row}>
-            <Ionicons name="document-text-outline" size={20} color={c.ink2} />
-            <Txt variant="headline" style={styles.flex}>
-              Sniper log
+            <Ionicons name="document-text-outline" size={22} color={c.primary} />
+            <Txt variant="bodyLarge" color={c.onSurface} style={styles.flex}>
+              Sniper execution log
             </Txt>
-            <Ionicons name="chevron-forward" size={16} color={c.ink3} />
+            <Ionicons name="chevron-forward" size={18} color={c.outline} />
           </Press>
         </Card>
-        <Txt variant="footnote" color={c.ink3} style={styles.footnote}>
-          Every step the sniper took, for when a snipe didn’t go as expected. Version {Constants.expoConfig?.version ?? '?'}.
+        <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.footnote}>
+          Step-by-step logs for verification. App version {Constants.expoConfig?.version ?? '1.0.0'}.
         </Txt>
       </View>
 
+      {/* Modal for Logs */}
       <Modal visible={log !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setLog(null)}>
-        <View style={[styles.flex, { backgroundColor: c.bg, paddingTop: insets.top }]}>
-          <View style={[styles.logTop, { borderBottomColor: c.hairline }]}>
-            <Txt variant="title">Sniper log</Txt>
-            <Press onPress={() => setLog(null)} accessibilityLabel="Close">
-              <Ionicons name="close" size={24} color={c.ink} />
-            </Press>
+        <View style={[styles.flex, { backgroundColor: c.surface, paddingTop: insets.top }]}>
+          <View style={[styles.logTop, { borderBottomColor: c.outlineVariant, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+            <Txt variant="titleLarge" color={c.onSurface}>Sniper Log</Txt>
+            <IconButton icon="close" label="Close" onPress={() => setLog(null)} size={40} />
           </View>
           <ScrollView contentContainerStyle={{ padding: space.l, paddingBottom: insets.bottom + space.l }}>
-            <Txt variant="footnote" color={c.ink2} style={styles.logText} selectable>
+            <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.logText} selectable>
               {log}
             </Txt>
           </ScrollView>
@@ -166,7 +191,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingBottom: space.xxl,
+    paddingBottom: TAB_CLEARANCE + space.xxl,
   },
   section: {
     paddingHorizontal: space.l,
@@ -175,17 +200,19 @@ const styles = StyleSheet.create({
   list: {
     paddingVertical: 0,
     paddingHorizontal: 0,
+    borderRadius: shape.large,
+    overflow: 'hidden',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.m,
     paddingHorizontal: space.l,
-    minHeight: 52,
+    minHeight: 56,
   },
   dot: {
-    width: 9,
-    height: 9,
+    width: 10,
+    height: 10,
     borderRadius: 5,
   },
   label: {
@@ -193,18 +220,18 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 16,
     paddingVertical: space.m,
     textAlign: 'right',
   },
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: radius.s,
+    borderRadius: shape.small,
   },
   stepButton: {
     width: 40,
-    height: 34,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -220,12 +247,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: space.l,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: space.l,
+    height: 64,
   },
   logText: {
     fontFamily: 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
+    lineHeight: 18,
   },
 });

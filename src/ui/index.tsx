@@ -1,4 +1,4 @@
-import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
+import React, { useImperativeHandle, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   LayoutChangeEvent,
@@ -25,49 +25,53 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { EASE_OUT, radius, space, springs, type, useColors } from '../theme';
+import { Colors, EASE_DECELERATE, EASE_STANDARD, elevation, shape, space, springs, type, useColors } from '../theme';
 
-// ---------------------------------------------------------------- Text
+export type IconName = keyof typeof Ionicons.glyphMap;
+
+// ---------------------------------------------------------------- Typography
 
 type Variant = keyof typeof type;
 
 export function Txt({
-  variant = 'body',
+  variant = 'bodyMedium',
   color,
   style,
   ...rest
 }: TextProps & { variant?: Variant; color?: string }) {
   const c = useColors();
-  return <Text {...rest} style={[type[variant], { color: color ?? c.ink }, style]} />;
+  return <Text {...rest} style={[type[variant], { color: color ?? c.onSurface }, style]} />;
 }
 
-// ---------------------------------------------------------------- Press feedback
+// ---------------------------------------------------------------- Press Feedback
 
 /**
- * Every pressable: feedback on press-in (3% scale, 120ms), commit on release. Pressed often,
- * so it stays near-imperceptible.
+ * Material 3 State Layer / Interactive Surface
+ * Supports tactile feedback and subtle pressed elevation / opacity.
  */
 export function Press({
   onPress,
+  onLongPress,
   disabled,
   style,
   children,
   haptic,
   accessibilityLabel,
+  accessibilityHint,
   accessibilityRole = 'button',
   accessibilityState,
 }: {
   onPress?: () => void;
+  onLongPress?: () => void;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
   haptic?: 'selection' | 'light';
   accessibilityLabel?: string;
-  accessibilityRole?: 'button' | 'tab' | 'radio' | 'switch';
-  accessibilityState?: { selected?: boolean; disabled?: boolean; checked?: boolean };
+  accessibilityHint?: string;
+  accessibilityRole?: 'button' | 'tab' | 'radio' | 'switch' | 'link';
+  accessibilityState?: { selected?: boolean; disabled?: boolean; checked?: boolean; expanded?: boolean };
 }) {
-  const scale = useSharedValue(1);
-  const scaleStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
   return (
     <Pressable
       onPress={() => {
@@ -75,129 +79,412 @@ export function Press({
         if (haptic === 'light') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress?.();
       }}
-      onPressIn={() => scale.set(withTiming(0.97, { duration: 100, easing: EASE_OUT }))}
-      onPressOut={() => scale.set(withTiming(1, { duration: 160, easing: EASE_OUT }))}
+      onLongPress={onLongPress}
       disabled={disabled}
       hitSlop={8}
       pressRetentionOffset={16}
+      style={({ pressed }) => [
+        style,
+        pressed && !disabled && { opacity: 0.76 },
+      ]}
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       accessibilityRole={accessibilityRole}
       accessibilityState={{ disabled, ...accessibilityState }}
     >
-      <Animated.View style={[style, !disabled && scaleStyle]}>{children}</Animated.View>
+      {children}
     </Pressable>
   );
 }
 
-// ---------------------------------------------------------------- Buttons
+// ---------------------------------------------------------------- Material 3 Buttons
 
+export type ButtonTone = 'filled' | 'tonal' | 'outlined' | 'text' | 'danger' | 'tube' | 'gold' | 'tint' | 'plain';
+
+function getButtonColors(c: Colors, tone: ButtonTone) {
+  switch (tone) {
+    case 'tonal':
+    case 'tint':
+      return { bg: c.secondaryContainer, fg: c.onSecondaryContainer, border: 'transparent' };
+    case 'outlined':
+      return { bg: 'transparent', fg: c.primary, border: c.outline };
+    case 'text':
+    case 'plain':
+      return { bg: 'transparent', fg: c.primary, border: 'transparent' };
+    case 'danger':
+      return { bg: c.errorContainer, fg: c.onErrorContainer, border: 'transparent' };
+    case 'gold':
+      return { bg: c.tertiaryContainer, fg: c.onTertiaryContainer, border: 'transparent' };
+    case 'filled':
+    case 'tube':
+    default:
+      return { bg: c.primary, fg: c.onPrimary, border: 'transparent' };
+  }
+}
+
+/**
+ * Material 3 Button
+ * Conforms to M3 Button specs: 40dp standard height (or 48dp large), rounded pill shape.
+ */
 export function Button({
   label,
   onPress,
-  tone = 'mat',
+  tone = 'filled',
   icon,
   loading,
   disabled,
+  size = 'l',
   style,
+  accessibilityHint,
 }: {
   label: string;
   onPress: () => void;
-  tone?: 'mat' | 'smash' | 'plain';
-  icon?: keyof typeof Ionicons.glyphMap;
+  tone?: ButtonTone;
+  icon?: IconName;
   loading?: boolean;
   disabled?: boolean;
+  size?: 'l' | 'm';
   style?: StyleProp<ViewStyle>;
+  accessibilityHint?: string;
 }) {
   const c = useColors();
-  const bg = tone === 'mat' ? c.mat : tone === 'smash' ? c.smash : c.fill;
-  const fg = tone === 'plain' ? c.ink : c.onAccent;
+  const { bg, fg, border } = getButtonColors(c, tone);
+  const isOutlined = tone === 'outlined';
+
   return (
     <Press
       onPress={onPress}
       disabled={disabled || loading}
-      style={[styles.button, { backgroundColor: bg, opacity: disabled ? 0.45 : 1 }, style]}
+      style={[
+        styles.button,
+        size === 'm' ? styles.buttonM : styles.buttonL,
+        {
+          backgroundColor: disabled ? c.surfaceContainerHighest : bg,
+          borderColor: disabled ? c.outlineVariant : border,
+          borderWidth: isOutlined ? 1 : 0,
+          opacity: disabled ? 0.6 : 1,
+        },
+        style,
+      ]}
       accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
     >
       {loading ? (
-        <ActivityIndicator color={fg} />
+        <ActivityIndicator color={disabled ? c.onSurfaceVariant : fg} size="small" />
       ) : (
-        <>
-          {icon ? <Ionicons name={icon} size={18} color={fg} /> : null}
-          <Txt variant="headline" color={fg}>
+        <View style={styles.buttonContent}>
+          {icon ? <Ionicons name={icon} size={size === 'm' ? 18 : 20} color={disabled ? c.onSurfaceVariant : fg} style={styles.buttonIcon} /> : null}
+          <Txt
+            variant={size === 'm' ? 'labelMedium' : 'labelLarge'}
+            color={disabled ? c.onSurfaceVariant : fg}
+            numberOfLines={1}
+            style={styles.buttonLabel}
+          >
             {label}
           </Txt>
-        </>
+        </View>
       )}
     </Press>
   );
 }
 
-// ---------------------------------------------------------------- Surfaces
-
-export function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+/**
+ * Material 3 Icon Button
+ * 40dp container, 48dp min touch target.
+ */
+export function IconButton({
+  icon,
+  onPress,
+  label,
+  color,
+  background,
+  variant = 'standard',
+  size = 40,
+}: {
+  icon: IconName;
+  onPress: () => void;
+  label: string;
+  color?: string;
+  background?: string;
+  variant?: 'standard' | 'filled' | 'tonal' | 'outlined';
+  size?: number;
+}) {
   const c = useColors();
-  return <View style={[styles.card, { backgroundColor: c.surface }, style]}>{children}</View>;
+  const bg =
+    background ??
+    (variant === 'filled'
+      ? c.primary
+      : variant === 'tonal'
+        ? c.secondaryContainer
+        : variant === 'outlined'
+          ? 'transparent'
+          : 'transparent');
+  const fg =
+    color ??
+    (variant === 'filled'
+      ? c.onPrimary
+      : variant === 'tonal'
+        ? c.onSecondaryContainer
+        : c.onSurfaceVariant);
+  const border = variant === 'outlined' ? c.outlineVariant : 'transparent';
+
+  return (
+    <Press
+      onPress={onPress}
+      style={[
+        styles.iconButton,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: bg,
+          borderColor: border,
+          borderWidth: variant === 'outlined' ? 1 : 0,
+        },
+      ]}
+      accessibilityLabel={label}
+    >
+      <Ionicons name={icon} size={Math.round(size * 0.55)} color={fg} />
+    </Press>
+  );
 }
 
-export function SectionTitle({ children, right }: { children: string; right?: React.ReactNode }) {
+// ---------------------------------------------------------------- Material 3 Cards
+
+export type CardVariant = 'elevated' | 'filled' | 'outlined';
+
+export function Card({
+  variant = 'filled',
+  style,
+  children,
+}: {
+  variant?: CardVariant;
+  style?: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
   const c = useColors();
+
+  const variantStyle: ViewStyle =
+    variant === 'elevated'
+      ? {
+          backgroundColor: c.surfaceContainerLow,
+          elevation: elevation.level1,
+          shadowColor: c.shadow,
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.15,
+          shadowRadius: 3,
+        }
+      : variant === 'outlined'
+        ? {
+            backgroundColor: c.surface,
+            borderWidth: 1,
+            borderColor: c.outlineVariant,
+          }
+        : {
+            backgroundColor: c.surfaceContainer,
+          };
+
+  return <View style={[styles.card, variantStyle, style]}>{children}</View>;
+}
+
+// ---------------------------------------------------------------- Material 3 List & Groups
+
+export function Group({
+  title,
+  right,
+  footer,
+  children,
+  style,
+}: {
+  title?: string;
+  right?: React.ReactNode;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useColors();
+  const rows = React.Children.toArray(children).filter(Boolean);
+
   return (
-    <View style={styles.sectionTitle}>
-      <Txt variant="caption" color={c.ink3}>
-        {children}
-      </Txt>
-      {right}
+    <View style={[styles.group, style]}>
+      {title ? (
+        <View style={styles.groupHeader}>
+          <Txt variant="titleSmall" color={c.primary} accessibilityRole="header">
+            {title}
+          </Txt>
+          {right}
+        </View>
+      ) : null}
+      <View style={[styles.groupBody, { backgroundColor: c.surfaceContainerLow, borderColor: c.outlineVariant }]}>
+        {rows.map((row, i) => (
+          <React.Fragment key={i}>
+            {i > 0 ? <Hairline inset={space.l} /> : null}
+            {row}
+          </React.Fragment>
+        ))}
+      </View>
+      {footer ? (
+        typeof footer === 'string' ? (
+          <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.groupFooter}>
+            {footer}
+          </Txt>
+        ) : (
+          <View style={styles.groupFooter}>{footer}</View>
+        )
+      ) : null}
     </View>
   );
 }
 
-export function Hairline({ inset = 0 }: { inset?: number }) {
+export function Row({
+  icon,
+  iconColor,
+  title,
+  subtitle,
+  value,
+  right,
+  onPress,
+  chevron,
+  destructive,
+  accessibilityLabel,
+}: {
+  icon?: IconName;
+  iconColor?: string;
+  title: string;
+  subtitle?: string;
+  value?: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  chevron?: boolean;
+  destructive?: boolean;
+  accessibilityLabel?: string;
+}) {
   const c = useColors();
-  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginLeft: inset }} />;
+  const body = (
+    <View style={styles.row}>
+      {icon ? <Ionicons name={icon} size={22} color={iconColor ?? c.onSurfaceVariant} style={styles.rowIcon} /> : null}
+      <View style={styles.flex}>
+        <Txt variant="bodyLarge" color={destructive ? c.error : c.onSurface}>
+          {title}
+        </Txt>
+        {subtitle ? (
+          <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.rowSubtitle}>
+            {subtitle}
+          </Txt>
+        ) : null}
+      </View>
+      {value ? (
+        <Txt variant="bodyMedium" color={c.onSurfaceVariant}>
+          {value}
+        </Txt>
+      ) : null}
+      {right}
+      {chevron ? <Ionicons name="chevron-forward" size={18} color={c.outline} /> : null}
+    </View>
+  );
+
+  if (!onPress) return body;
+  return (
+    <Press onPress={onPress} accessibilityLabel={accessibilityLabel ?? title}>
+      {body}
+    </Press>
+  );
 }
 
-// ---------------------------------------------------------------- Segmented control
+export function Hairline({ inset = 0, color }: { inset?: number; color?: string }) {
+  const c = useColors();
+  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: color ?? c.outlineVariant, marginLeft: inset }} />;
+}
 
-/** Two or three peers; the thumb slides because it marks a position, not a page. */
+// ---------------------------------------------------------------- Material 3 Chips
+
+export function Chip({
+  label,
+  selected,
+  onPress,
+  icon,
+  style,
+}: {
+  label: string;
+  selected?: boolean;
+  onPress?: () => void;
+  icon?: IconName;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useColors();
+  const bg = selected ? c.secondaryContainer : 'transparent';
+  const fg = selected ? c.onSecondaryContainer : c.onSurfaceVariant;
+  const borderColor = selected ? 'transparent' : c.outlineVariant;
+
+  return (
+    <Press
+      onPress={onPress}
+      style={[
+        styles.chip,
+        {
+          backgroundColor: bg,
+          borderColor: borderColor,
+        },
+        style,
+      ]}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+    >
+      {selected ? (
+        <Ionicons name="checkmark" size={16} color={fg} style={{ marginRight: 4 }} />
+      ) : icon ? (
+        <Ionicons name={icon} size={16} color={fg} style={{ marginRight: 4 }} />
+      ) : null}
+      <Txt variant="labelMedium" color={fg}>
+        {label}
+      </Txt>
+    </Press>
+  );
+}
+
+// ---------------------------------------------------------------- Material 3 Segmented Button
+
+/**
+ * Material 3 Single-Select Segmented Button
+ * Connected buttons with border, active segment indicated by secondaryContainer and checkmark.
+ */
 export function Segmented<T extends string>({
   options,
   value,
   onChange,
+  style,
 }: {
-  options: { value: T; label: string; badge?: string }[];
+  options: { value: T; label: string; dot?: string; disabled?: boolean }[];
   value: T;
   onChange: (v: T) => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   const c = useColors();
-  const [width, setWidth] = useState(0);
-  const index = Math.max(0, options.findIndex((o) => o.value === value));
-  const thumbW = width / options.length;
-  const thumbX = useSharedValue(0);
-  useEffect(() => {
-    thumbX.set(withTiming(index * thumbW, { duration: 200, easing: EASE_OUT }));
-  }, [index, thumbW, thumbX]);
-  const thumbStyle = useAnimatedStyle(() => ({ transform: [{ translateX: thumbX.get() }] }));
+
   return (
-    <View
-      style={[styles.segmented, { backgroundColor: c.fill }]}
-      onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width - 4)}
-      accessibilityRole="tablist"
-    >
-      {width > 0 ? (
-        <Animated.View
-          style={[
-            styles.segThumb,
-            { width: thumbW, backgroundColor: c.surfaceRaised },
-            thumbStyle,
-          ]}
-        />
-      ) : null}
-      {options.map((o) => {
+    <View style={[styles.segmented, { borderColor: c.outlineVariant }, style]} accessibilityRole="tablist">
+      {options.map((o, idx) => {
         const selected = o.value === value;
+        const isFirst = idx === 0;
+        const isLast = idx === options.length - 1;
+
         return (
           <Pressable
             key={o.value}
-            style={styles.segItem}
+            style={[
+              styles.segItem,
+              {
+                backgroundColor: selected ? c.secondaryContainer : 'transparent',
+                borderLeftWidth: idx > 0 ? 1 : 0,
+                borderLeftColor: c.outlineVariant,
+                borderTopLeftRadius: isFirst ? shape.full : 0,
+                borderBottomLeftRadius: isFirst ? shape.full : 0,
+                borderTopRightRadius: isLast ? shape.full : 0,
+                borderBottomRightRadius: isLast ? shape.full : 0,
+                opacity: o.disabled ? 0.38 : 1,
+              },
+            ]}
+            disabled={o.disabled}
             onPress={() => {
               if (!selected) {
                 Haptics.selectionAsync();
@@ -205,18 +492,21 @@ export function Segmented<T extends string>({
               }
             }}
             accessibilityRole="tab"
-            accessibilityState={{ selected }}
+            accessibilityLabel={o.label}
+            accessibilityState={{ selected, disabled: o.disabled }}
           >
-            <Txt variant="callout" color={selected ? c.ink : c.ink2} style={{ fontWeight: selected ? '600' : '500' }}>
+            {selected ? (
+              <Ionicons name="checkmark" size={16} color={c.onSecondaryContainer} style={{ marginRight: 4 }} />
+            ) : null}
+            <Txt
+              variant="labelLarge"
+              color={selected ? c.onSecondaryContainer : c.onSurface}
+              style={{ fontWeight: selected ? '600' : '400' }}
+              numberOfLines={1}
+            >
               {o.label}
             </Txt>
-            {o.badge ? (
-              <View style={[styles.segBadge, { backgroundColor: c.smashSoft }]}>
-                <Txt variant="caption" color={c.smash} style={{ fontSize: 9, lineHeight: 11 }}>
-                  {o.badge}
-                </Txt>
-              </View>
-            ) : null}
+            {o.dot ? <View style={[styles.segDot, { backgroundColor: o.dot }]} /> : null}
           </Pressable>
         );
       })}
@@ -224,7 +514,36 @@ export function Segmented<T extends string>({
   );
 }
 
-// ---------------------------------------------------------------- Bottom sheet
+// ---------------------------------------------------------------- Material 3 Tonal Banners / Notes
+
+export function Note({
+  tone,
+  children,
+  style,
+}: {
+  tone: 'info' | 'warn' | 'error';
+  children: string;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useColors();
+  const look =
+    tone === 'error'
+      ? { bg: c.errorContainer, fg: c.onErrorContainer, icon: 'alert-circle' as const }
+      : tone === 'warn'
+        ? { bg: c.tertiaryContainer, fg: c.onTertiaryContainer, icon: 'warning' as const }
+        : { bg: c.primaryContainer, fg: c.onPrimaryContainer, icon: 'information-circle' as const };
+
+  return (
+    <View style={[styles.note, { backgroundColor: look.bg }, style]} accessibilityLiveRegion="polite">
+      <Ionicons name={look.icon} size={20} color={look.fg} style={styles.noteIcon} />
+      <Txt variant="bodyMedium" color={look.fg} style={styles.flex}>
+        {children}
+      </Txt>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- Material 3 Bottom Sheet
 
 export type SheetHandle = { open: () => void; close: () => void };
 
@@ -233,14 +552,9 @@ function project(velocity: number, decelerationRate = 0.998) {
   return ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
 }
 
-function rubberband(overshoot: number, dimension: number, constant = 0.55) {
-  'worklet';
-  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
-}
-
 /**
- * A sheet that rises from the bottom edge and goes back the same way: drag it, flick it,
- * tap the scrim. The release velocity carries into the spring, so there is no seam.
+ * Material 3 Modal Bottom Sheet
+ * Top corner radius: 28dp (extraLarge), drag handle: 32x4dp.
  */
 export function Sheet({
   ref,
@@ -268,18 +582,20 @@ export function Sheet({
   const close = () => {
     const h = height.get();
     if (reduced) {
-      y.set(withTiming(h, { duration: 150 }, (done) => done && scheduleOnRN(finish)));
+      y.set(withTiming(h, { duration: 160 }, (done) => done && scheduleOnRN(finish)));
     } else {
-      y.set(withSpring(h, { ...springs.sheet, dampingRatio: 1, overshootClamping: true }, (done) => {
-        if (done) scheduleOnRN(finish);
-      }));
+      y.set(
+        withSpring(h, { ...springs.sheet, dampingRatio: 1, overshootClamping: true }, (done) => {
+          if (done) scheduleOnRN(finish);
+        }),
+      );
     }
   };
 
   useImperativeHandle(ref, () => ({
     open: () => {
       pendingOpen.current = true;
-      y.set(10_000); // off-screen until measured, then it rises from its own height
+      y.set(10_000);
       setMounted(true);
     },
     close,
@@ -291,7 +607,7 @@ export function Sheet({
     if (pendingOpen.current) {
       pendingOpen.current = false;
       y.set(h);
-      y.set(reduced ? withTiming(0, { duration: 200, easing: EASE_OUT }) : withSpring(0, springs.sheet));
+      y.set(reduced ? withTiming(0, { duration: 200, easing: EASE_STANDARD }) : withSpring(0, springs.sheet));
     }
   };
 
@@ -299,20 +615,22 @@ export function Sheet({
     activeOffsetY: [-10, 10],
     onActivate: () => {
       'worklet';
-      startY.set(y.get()); // grab it where the eye last saw it
+      startY.set(y.get());
     },
     onUpdate: (e) => {
       'worklet';
       const next = startY.get() + e.translationY;
-      y.set(next >= 0 ? next : rubberband(next, height.get()));
+      y.set(Math.max(0, next));
     },
     onDeactivate: (e) => {
       'worklet';
       const h = height.get();
       if (y.get() + project(e.velocityY) > h * 0.35) {
-        y.set(withSpring(h, { ...springs.sheet, dampingRatio: 1, velocity: e.velocityY, overshootClamping: true }, (done) => {
-          if (done) scheduleOnRN(finish);
-        }));
+        y.set(
+          withSpring(h, { ...springs.sheet, dampingRatio: 1, velocity: e.velocityY, overshootClamping: true }, (done) => {
+            if (done) scheduleOnRN(finish);
+          }),
+        );
       } else {
         y.set(withSpring(0, { ...springs.snap, velocity: e.velocityY }));
       }
@@ -325,22 +643,23 @@ export function Sheet({
   }));
 
   if (!mounted) return null;
+
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={close}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureHandlerRootView style={styles.flex}>
         <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: c.scrim }, scrimStyle]}>
-          <Pressable style={{ flex: 1 }} onPress={close} accessibilityLabel="Close" />
+          <Pressable style={styles.flex} onPress={close} accessibilityLabel="Close" />
         </Animated.View>
         <GestureDetector gesture={pan}>
           <Animated.View
             onLayout={onLayout}
             style={[
               styles.sheet,
-              { backgroundColor: c.surface, paddingBottom: insets.bottom + space.l },
+              { backgroundColor: c.surfaceContainerLow, paddingBottom: insets.bottom + space.l, maxHeight: '92%' },
               panelStyle,
             ]}
           >
-            <View style={[styles.grabber, { backgroundColor: c.hairline }]} />
+            <View style={[styles.grabber, { backgroundColor: c.outlineVariant }]} />
             {children}
           </Animated.View>
         </GestureDetector>
@@ -349,72 +668,195 @@ export function Sheet({
   );
 }
 
+// ---------------------------------------------------------------- Material 3 Full Page
+
+export function Page({
+  visible,
+  title,
+  onClose,
+  closeLabel = 'Close',
+  children,
+}: {
+  visible: boolean;
+  title: string;
+  onClose: () => void;
+  closeLabel?: string;
+  children: React.ReactNode;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal visible={visible} animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+      <View style={[styles.flex, { backgroundColor: c.surface, paddingTop: insets.top }]}>
+        <View style={[styles.pageBar, { borderBottomColor: c.outlineVariant, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <IconButton icon="close" label={closeLabel} onPress={onClose} size={40} />
+          <Txt variant="titleLarge" accessibilityRole="header" numberOfLines={1} style={styles.pageTitle}>
+            {title}
+          </Txt>
+          <View style={styles.pageBarSide} />
+        </View>
+        <View style={styles.flex}>{children}</View>
+      </View>
+    </Modal>
+  );
+}
+
+export function SectionTitle({ children }: { children: string }) {
+  const c = useColors();
+  return (
+    <Txt variant="titleSmall" color={c.primary} style={styles.sectionHeader}>
+      {children}
+    </Txt>
+  );
+}
+
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   button: {
-    minHeight: 52,
-    borderRadius: radius.m,
+    borderRadius: shape.full,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: space.s,
+    minWidth: 64,
+  },
+  buttonL: {
+    minHeight: 48,
+    paddingHorizontal: space.xl,
+  },
+  buttonM: {
+    minHeight: 40,
     paddingHorizontal: space.l,
   },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonIcon: {
+    marginRight: space.s,
+  },
+  buttonLabel: {
+    flexShrink: 1,
+  },
+  iconButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   card: {
-    borderRadius: radius.l,
+    borderRadius: shape.medium,
     padding: space.l,
   },
-  sectionTitle: {
+  group: {
+    marginTop: space.l,
+    paddingHorizontal: space.l,
+  },
+  groupHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: space.xs,
     marginBottom: space.s,
+    minHeight: 20,
+  },
+  groupBody: {
+    borderRadius: shape.large,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  groupFooter: {
+    paddingHorizontal: space.xs,
+    marginTop: space.s,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.m,
+    paddingHorizontal: space.l,
+    paddingVertical: space.m,
+    minHeight: 56,
+  },
+  rowIcon: {
+    width: 24,
+    textAlign: 'center',
+  },
+  rowSubtitle: {
+    marginTop: 2,
+  },
+  chip: {
+    height: 32,
+    borderRadius: shape.small,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space.m,
   },
   segmented: {
     flexDirection: 'row',
-    borderRadius: 10,
-    padding: 2,
-    height: 38,
-  },
-  segThumb: {
-    position: 'absolute',
-    top: 2,
-    bottom: 2,
-    left: 2,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    borderWidth: 1,
+    borderRadius: shape.full,
+    height: 40,
+    overflow: 'hidden',
   },
   segItem: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    paddingHorizontal: space.m,
   },
-  segBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 5,
+  segDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginLeft: 6,
+  },
+  note: {
+    flexDirection: 'row',
+    gap: space.m,
+    paddingVertical: space.m,
+    paddingHorizontal: space.l,
+    borderRadius: shape.medium,
+    alignItems: 'center',
+  },
+  noteIcon: {
+    marginTop: 0,
   },
   sheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopLeftRadius: radius.sheet,
-    borderTopRightRadius: radius.sheet,
-    paddingHorizontal: space.l,
+    borderTopLeftRadius: shape.extraLarge,
+    borderTopRightRadius: shape.extraLarge,
+    paddingHorizontal: space.xl,
     paddingTop: space.s,
   },
   grabber: {
     alignSelf: 'center',
+    width: 32,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: space.l,
+  },
+  pageBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: space.l,
+    height: 64,
+  },
+  pageBarSide: {
     width: 40,
-    height: 5,
-    borderRadius: 3,
-    marginBottom: space.m,
+  },
+  pageTitle: {
+    flex: 1,
+    textAlign: 'center',
+  },
+  sectionHeader: {
+    marginBottom: space.s,
+    paddingHorizontal: space.xs,
   },
 });

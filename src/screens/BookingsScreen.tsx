@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { getBookings } from '../services/api';
 import { useCached } from '../services/cache';
-import { Button, Card, Press, Txt } from '../ui';
-import { ScreenHeader, SessionPill } from '../components/Pieces';
+import { Button, Card, Txt } from '../ui';
+import { Empty, ScreenHeader, SessionPill, TAB_CLEARANCE } from '../components/Pieces';
 import { UmpointSheet } from '../components/UmpointSheet';
 import { Booking } from '../types';
-import { radius, space, useColors } from '../theme';
+import { elevation, shape, space, useColors } from '../theme';
 
-/** "23/10/2026 12:00 PM - 12:30 PM" → parts to lay out; falls back to the raw text. */
+/** "23/10/2026 12:00 PM - 12:30 PM" → parts to lay out; falls back to raw text. */
 function parseWhen(eventDate: string) {
   const m = eventDate.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)/i);
   if (!m) return null;
@@ -36,68 +35,95 @@ export const BookingsScreen: React.FC<{ onOpenSettings: () => void }> = ({ onOpe
   const [dashboardOpen, setDashboardOpen] = useState(false);
 
   return (
-    <View style={[styles.flex, { backgroundColor: c.bg }]}>
+    <View style={[styles.flex, { backgroundColor: c.surface }]}>
       <ScreenHeader title="Bookings" right={<SessionPill onOpenSettings={onOpenSettings} />} />
+
       <ScrollView
         style={styles.flex}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={list.refresh} tintColor={c.mat} colors={[c.mat]} />}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={list.refresh} tintColor={c.primary} colors={[c.primary]} />}
       >
-        <Txt variant="footnote" color={list.error ? c.smash : c.ink3} style={styles.status}>
+        <Txt variant="labelSmall" color={list.error ? c.error : c.onSurfaceVariant} style={styles.status}>
           {list.refreshing ? 'Updating…' : list.error ? `Couldn’t refresh: ${list.error}` : 'From your UMPoint dashboard'}
         </Txt>
 
         {list.data === null ? (
           list.error ? (
-            <Empty icon="cloud-offline-outline" title="Can’t read your bookings" text={list.error} action={<Button label="Try again" tone="plain" onPress={list.refresh} />} />
+            <Empty
+              icon="cloud-offline-outline"
+              title="Cannot load bookings"
+              text={list.error}
+              action={<Button label="Try again" tone="tonal" onPress={list.refresh} />}
+            />
           ) : (
-            <Card style={{ height: 120, backgroundColor: c.surface }}>
+            <Card style={{ height: 120, backgroundColor: c.surfaceContainerLow }}>
               <View />
             </Card>
           )
         ) : list.data.length === 0 ? (
-          <Empty icon="calendar-clear-outline" title="No bookings" text="Courts you book or snipe show up here." />
+          <Empty
+            icon="calendar-clear-outline"
+            title="No active bookings"
+            text="Courts you book or successfully snipe will appear here."
+          />
         ) : (
           list.data.map((b, i) => {
             const when = parseWhen(b.event_date);
             const what = parseFacility(b.facility);
+
             return (
-              <Card key={`${b.event_date}-${i}`} style={styles.card}>
+              <Card
+                key={`${b.event_date}-${i}`}
+                style={[
+                  styles.card,
+                  {
+                    backgroundColor: c.surfaceContainerLow,
+                    borderColor: c.outlineVariant,
+                    borderWidth: 1,
+                    elevation: elevation.level1,
+                  },
+                ]}
+              >
                 <View style={styles.cardTop}>
-                  <View style={[styles.courtBadge, { backgroundColor: c.mat }]}>
-                    <Txt variant="caption" color={c.courtLine} style={{ fontSize: 9 }}>
+                  <View style={[styles.courtBadge, { backgroundColor: c.secondaryContainer }]}>
+                    <Txt variant="labelSmall" color={c.onSecondaryContainer} style={{ fontSize: 10 }}>
                       Court
                     </Txt>
-                    <Txt variant="time" color={c.courtLine} style={{ fontSize: 26, lineHeight: 28 }}>
+                    <Txt variant="titleLarge" color={c.onSecondaryContainer} style={{ fontSize: 24, lineHeight: 28, fontWeight: '700' }}>
                       {what.court ?? '–'}
                     </Txt>
                   </View>
+
                   <View style={styles.flex}>
-                    <Txt variant="caption" color={c.ink3}>
+                    <Txt variant="labelMedium" color={c.onSurfaceVariant}>
                       {when?.day ?? b.event_date}
                     </Txt>
                     {when ? (
                       <View style={styles.when}>
-                        <Txt variant="time">{when.start}</Txt>
-                        <Txt variant="headline" color={c.ink2}>
+                        <Txt variant="headlineSmall" color={c.onSurface}>{when.start}</Txt>
+                        <Txt variant="bodyMedium" color={c.onSurfaceVariant}>
                           to {when.end}
                         </Txt>
                       </View>
                     ) : null}
                     {what.event ? (
-                      <Txt variant="footnote" color={c.ink2} numberOfLines={1}>
+                      <Txt variant="bodySmall" color={c.onSurfaceVariant} numberOfLines={1}>
                         {what.event}
                       </Txt>
                     ) : null}
                   </View>
                 </View>
+
                 {b.cancellable ? (
-                  <Press onPress={() => setDashboardOpen(true)} style={styles.cancel}>
-                    <Ionicons name="open-outline" size={15} color={c.smash} />
-                    <Txt variant="callout" color={c.smash} style={{ fontWeight: '600' }}>
-                      Cancel on UMPoint
-                    </Txt>
-                  </Press>
+                  <View style={styles.actionRow}>
+                    <Button
+                      label="Cancel on UMPoint"
+                      tone="danger"
+                      size="m"
+                      icon="open-outline"
+                      onPress={() => setDashboardOpen(true)}
+                    />
+                  </View>
                 ) : null}
               </Card>
             );
@@ -117,46 +143,32 @@ export const BookingsScreen: React.FC<{ onOpenSettings: () => void }> = ({ onOpe
   );
 };
 
-function Empty({ icon, title, text, action }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string; action?: React.ReactNode }) {
-  const c = useColors();
-  return (
-    <View style={styles.empty}>
-      <Ionicons name={icon} size={40} color={c.ink3} />
-      <Txt variant="headline" style={{ marginTop: space.m }}>
-        {title}
-      </Txt>
-      <Txt variant="footnote" color={c.ink2} style={{ textAlign: 'center', marginTop: 4 }}>
-        {text}
-      </Txt>
-      {action ? <View style={{ alignSelf: 'stretch', marginTop: space.l }}>{action}</View> : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
   content: {
     paddingHorizontal: space.l,
-    paddingBottom: space.xxl,
+    paddingBottom: TAB_CLEARANCE + space.xxl,
   },
   status: {
     paddingHorizontal: space.xs,
     marginBottom: space.s,
   },
   card: {
+    borderRadius: shape.large,
+    padding: space.l,
     marginBottom: space.m,
   },
   cardTop: {
     flexDirection: 'row',
-    gap: space.l,
+    gap: space.m,
     alignItems: 'center',
   },
   courtBadge: {
-    width: 56,
+    width: 60,
     height: 64,
-    borderRadius: radius.m,
+    borderRadius: shape.medium,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -166,16 +178,9 @@ const styles = StyleSheet.create({
     gap: space.s,
     marginVertical: 2,
   },
-  cancel: {
+  actionRow: {
+    marginTop: space.l,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    marginTop: space.m,
-  },
-  empty: {
-    alignItems: 'center',
-    paddingVertical: space.xxl,
-    paddingHorizontal: space.xl,
+    justifyContent: 'flex-start',
   },
 });

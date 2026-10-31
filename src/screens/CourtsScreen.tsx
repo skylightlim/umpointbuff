@@ -1,75 +1,137 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { BackHandler, LayoutChangeEvent, RefreshControl, StyleSheet, Switch, View } from 'react-native';
+import Animated, {
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  useAnimatedRef,
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { Sniper } from '../../modules/umpoint-sniper';
-import { COURT_IDS, bookCourt, getWeek, scheduleSnipe } from '../services/api';
+import { COURT_IDS, bookCourt, getWeek } from '../services/api';
 import { BookingPrefs, DEFAULT_PREFS, loadPrefs, useCached } from '../services/cache';
-import {
-  CLOSING_TIME,
-  dateMs,
-  dayLabel,
-  hhmm,
-  isWeekday,
-  minutes,
-  mytDate,
-  nextRolloverMs,
-  weekStartMs,
-} from '../services/umpointClient';
+import { armSnipe, isLive, useTasks } from '../services/tasks';
+import { CLOSING_TIME, dateMs, dayLabel, hhmm, minutes, mytDate, nextRolloverMs, weekStartMs } from '../services/umpointClient';
+import { ago, countdown, shortDay } from '../services/week';
+import { SniperTask } from '../../modules/umpoint-sniper';
 import { CourtId, SlotStatus, WeekGrid, WeekType } from '../types';
-import { Button, Hairline, Press, Segmented, Sheet, SheetHandle, Txt } from '../ui';
-import { CourtMarks, CourtTile, ScreenHeader, SessionPill, useToast } from '../components/Pieces';
-import { radius, space, useColors } from '../theme';
+import { Button, Note, Press, Segmented, Txt } from '../ui';
+import { AccountButton, CourtMeter, CourtTile, LargeHeader, TAB_CLEARANCE, useToast } from '../components/Pieces';
+import { EASE_DECELERATE, elevation, shape, space, useColors } from '../theme';
 
 const DAY = 86_400_000;
+const GUTTER = 62;
 
-/** For the 26 Oct 2026 study: snipes also record how fast courts go until 01:00. */
 const RECORD_ROLLOVER = true;
+
+const ROW_LAYOUT = LinearTransition.duration(240).easing(EASE_DECELERATE);
+const PICKER_IN = FadeIn.duration(180).delay(40);
+const PICKER_OUT = FadeOut.duration(120);
 
 interface Props {
   week: WeekType;
   onWeekChange: (w: WeekType) => void;
   onOpenSettings: () => void;
   onOpenSniper: () => void;
+  onArmed: () => void;
 }
 
-function ago(at: number | null, now: number): string {
-  if (!at) return '';
-  const min = Math.round((now - at) / 60_000);
-  return min < 1 ? 'Updated just now' : min < 60 ? `Updated ${min} min ago` : `Updated ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+function armedAt(tasks: SniperTask[], date: string, start: string): Set<string> {
+  const at = minutes(start);
+  return new Set(
+    tasks
+      .filter((t) => isLive(t) && !t.dryRun && t.date === date && minutes(t.start) <= at && at < minutes(t.end))
+      .map((t) => t.court),
+  );
 }
 
-export const CourtsScreen: React.FC<Props> = ({ week, onWeekChange, onOpenSettings, onOpenSniper }) => {
+function Countdown({ to }: { to: number }) {
   const c = useColors();
-  const monday = weekStartMs() + (week === 'next' ? 7 * DAY : 0);
-  const grid = useCached<WeekGrid>(`week:${mytDate(monday)}`, () => getWeek(week));
-  const [showEarlier, setShowEarlier] = useState(false);
-  const [pickedDate, setPickedDate] = useState<string | null>(null);
-  const [slot, setSlot] = useState<{ date: string; start: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const sheet = useRef<SheetHandle>(null);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Bookable: a weekday at least a day ahead. Next week opens at its Monday 00:00, which makes
-  // that Monday same-day — so Tue–Fri there.
-  const today = mytDate(now);
-  const earliest = (week === 'this' ? dateMs(today) : nextRolloverMs(now)) + DAY;
-  const bookable = (d: string) => dateMs(d) >= earliest;
-  const weekdays = (grid.data?.dates ?? []).filter(isWeekday);
-  const days = weekdays.filter((d) => showEarlier || bookable(d));
-  const hiddenEarlier = weekdays.filter((d) => !bookable(d)).length;
-  const date = pickedDate && days.includes(pickedDate) ? pickedDate : (days.find(bookable) ?? days[0]);
-  const readOnly = !date || !bookable(date);
+  return (
+    <Txt variant="labelMedium" color={c.tertiary} style={styles.tabular}>
+      Opens in {countdown(to - now)}
+    </Txt>
+  );
+}
 
-  const open = (start: string) => {
-    if (!date || readOnly) return;
-    setSlot({ date, start });
-    sheet.current?.open();
+export const CourtsScreen: React.FC<Props> = ({ week, onWeekChange, onOpenSettings, onOpenSniper, onArmed }) => {
+  const c = useColors();
+  const tasks = useTasks();
+  const [now] = useState(() => Date.now());
+  const monday = weekStartMs(now) + (week === 'next' ? 7 * DAY : 0);
+  const grid = useCached<WeekGrid>(`week:${mytDate(monday)}`, () => getWeek(week));
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
+  const scrollY = useSharedValue(0);
+  const viewport = useRef(0);
+  const boardY = useRef(0);
+  const pendingScroll = useRef<string | null>(null);
+
+  const onScroll = useAnimatedScrollHandler((e) => {
+    scrollY.set(e.contentOffset.y);
+  });
+
+  const today = mytDate(now);
+  const rollover = nextRolloverMs(now);
+  const earliest = (week === 'this' ? dateMs(today) : rollover) + DAY;
+  const bookable = (d: string) => dateMs(d) >= earliest;
+  const days = Array.from({ length: 5 }, (_, i) => mytDate(monday + i * DAY));
+  const date = pickedDate && days.includes(pickedDate) ? pickedDate : (days.find(bookable) ?? days[4]);
+  const readOnly = !bookable(date);
+  const nothingLeft = !days.some(bookable);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setExpanded(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [expanded]);
+
+  const pickDay = (d: string) => {
+    setPickedDate(d);
+    setExpanded(null);
   };
+
+  const toggle = (start: string) => {
+    if (readOnly) return;
+    if (expanded === start) {
+      setExpanded(null);
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    pendingScroll.current = start;
+    setExpanded(start);
+  };
+
+  const onPickerLayout = (start: string, e: LayoutChangeEvent) => {
+    if (pendingScroll.current !== start) return;
+    pendingScroll.current = null;
+    const { y, height } = e.nativeEvent.layout;
+    const top = boardY.current + y;
+    const bottom = top + height;
+    const visibleTop = scrollY.get();
+    const visibleBottom = visibleTop + viewport.current - TAB_CLEARANCE;
+    if (bottom > visibleBottom || top < visibleTop) {
+      scrollRef.current?.scrollTo({ y: Math.max(0, Math.min(top - space.s, bottom - (viewport.current - TAB_CLEARANCE))), animated: true });
+    }
+  };
+
+  const armedDays = new Set(tasks.filter((t) => isLive(t) && !t.dryRun).map((t) => t.date));
+  const mineDays = new Set(
+    days.filter((d) => Object.values(grid.data?.status[d] ?? {}).some((byCourt) => Object.values(byCourt).includes('mine'))),
+  );
 
   const statusLine = grid.refreshing
     ? 'Updating…'
@@ -77,192 +139,230 @@ export const CourtsScreen: React.FC<Props> = ({ week, onWeekChange, onOpenSettin
       ? `Couldn’t refresh: ${grid.error}`
       : ago(grid.updatedAt, now);
 
-  return (
-    <View style={[styles.flex, { backgroundColor: c.bg }]}>
-      <ScreenHeader title="Courts" right={<SessionPill onOpenSettings={onOpenSettings} />} />
+  const readOnlyReason =
+    week === 'next' && dateMs(date) === rollover
+      ? 'Monday opens at 00:00 that same day, so it can’t be sniped. Pick Tuesday to Friday.'
+      : date === today
+        ? 'Today can’t be booked anymore. Courts are booked at least a day ahead.'
+        : 'This day has passed. You can view court history.';
 
+  return (
+    <View style={[styles.flex, { backgroundColor: c.surface }]}>
+      <LargeHeader title="Courts" right={<AccountButton onOpenSettings={onOpenSettings} />} />
+
+      {/* Material 3 Segmented Button for Week Switching */}
       <View style={styles.pad}>
         <Segmented
           options={[
             { value: 'this', label: 'This week' },
-            { value: 'next', label: 'Next week', badge: 'SNIPE' },
+            { value: 'next', label: 'Next week', dot: [...armedDays].some((d) => dateMs(d) >= rollover) ? c.tertiary : undefined },
           ]}
           value={week}
           onChange={(w) => {
             setPickedDate(null);
+            setExpanded(null);
             onWeekChange(w);
           }}
         />
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.days}
-        style={styles.daysScroll}
-      >
-        {hiddenEarlier > 0 && week === 'this' ? (
-          <Press
-            onPress={() => setShowEarlier((v) => !v)}
-            haptic="selection"
-            style={[styles.dayChip, styles.earlier, { borderColor: c.hairline }]}
-            accessibilityLabel={showEarlier ? 'Hide earlier days' : 'Show earlier days'}
-          >
-            <Ionicons name={showEarlier ? 'eye-off-outline' : 'time-outline'} size={16} color={c.ink2} />
-            <Txt variant="footnote" color={c.ink2}>
-              {showEarlier ? 'Hide' : 'Earlier'}
-            </Txt>
-          </Press>
-        ) : null}
+      {/* Material 3 Day Selector Cards */}
+      <View style={styles.days} accessibilityRole="tablist">
         {days.map((d) => {
           const selected = d === date;
-          const past = !bookable(d);
+          const can = bookable(d);
           const [dd] = d.split('-');
+          const marker = armedDays.has(d) ? c.tertiary : mineDays.has(d) ? c.secondary : null;
+          const caption = d === today ? 'Today' : dayLabel(d).split(' ')[0];
+
           return (
             <Press
               key={d}
-              onPress={() => setPickedDate(d)}
+              onPress={() => pickDay(d)}
               haptic="selection"
               style={[
-                styles.dayChip,
-                { backgroundColor: selected ? c.ink : c.surface, opacity: past && !selected ? 0.6 : 1 },
+                styles.day,
+                {
+                  backgroundColor: selected
+                    ? c.secondaryContainer
+                    : c.surfaceContainerLow,
+                  borderColor: selected ? c.secondary : c.outlineVariant,
+                  borderWidth: selected ? 1.5 : 1,
+                  opacity: can || selected ? 1 : 0.45,
+                },
               ]}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
-              accessibilityLabel={`${dayLabel(d)}${past ? ', past' : ''}`}
+              accessibilityLabel={`${dayLabel(d)}${can ? '' : ', cannot be booked'}${marker === c.tertiary ? ', snipe armed' : marker ? ', you have a booking' : ''}`}
             >
-              <Txt variant="caption" color={selected ? c.surface : c.ink3}>
-                {d === today ? 'Today' : past ? 'Past' : dayLabel(d).split(' ')[0]}
+              <Txt variant="labelSmall" color={selected ? c.onSecondaryContainer : c.onSurfaceVariant}>
+                {caption}
               </Txt>
-              <Txt variant="time" color={selected ? c.surface : c.ink}>
-                {dd}
+              <Txt variant="titleLarge" color={selected ? c.onSecondaryContainer : can ? c.onSurface : c.outline} style={!can && !selected && styles.struck}>
+                {String(Number(dd))}
               </Txt>
+              <View style={[styles.dayMarker, { backgroundColor: marker ?? 'transparent' }]} />
             </Press>
           );
         })}
-      </ScrollView>
-
-      <View style={[styles.pad, styles.statusRow]}>
-        <Txt variant="footnote" color={grid.error ? c.smash : c.ink3} numberOfLines={1} style={styles.flex}>
-          {statusLine}
-        </Txt>
-        {week === 'next' ? (
-          <Txt variant="footnote" color={c.smash}>
-            Opens Mon {dayLabel(mytDate(nextRolloverMs(now))).split(' ').slice(1).join(' ')} 00:00
-          </Txt>
-        ) : null}
       </View>
 
-      <ScrollView
+      {/* Status info row */}
+      <View style={[styles.pad, styles.statusRow]}>
+        <Txt variant="labelSmall" color={grid.error ? c.error : c.onSurfaceVariant} numberOfLines={1} style={styles.flex}>
+          {statusLine}
+        </Txt>
+        {week === 'next' ? <Countdown to={rollover} /> : null}
+      </View>
+
+      <Animated.ScrollView
+        ref={scrollRef}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         style={styles.flex}
-        contentContainerStyle={styles.rail}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={grid.refresh} tintColor={c.mat} colors={[c.mat]} />}
+        onLayout={(e) => (viewport.current = e.nativeEvent.layout.height)}
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={grid.refresh} tintColor={c.primary} colors={[c.primary]} />}
       >
         {!grid.data ? (
           grid.error ? (
             <View style={styles.empty}>
-              <Ionicons name="cloud-offline-outline" size={40} color={c.ink3} />
-              <Txt variant="headline" style={{ marginTop: space.m }}>
-                Can’t load the courts
+              <Ionicons name="cloud-offline-outline" size={48} color={c.onSurfaceVariant} />
+              <Txt variant="titleMedium" color={c.onSurface} style={styles.emptyTitle}>
+                Can’t load courts
               </Txt>
-              <Txt variant="footnote" color={c.ink2} style={{ textAlign: 'center', marginTop: 4 }}>
+              <Txt variant="bodyMedium" color={c.onSurfaceVariant} style={styles.emptyText}>
                 {grid.error}
               </Txt>
-              <Button label="Try again" tone="plain" onPress={grid.refresh} style={{ marginTop: space.l, alignSelf: 'stretch' }} />
+              <Button label="Try again" tone="tonal" onPress={grid.refresh} style={styles.emptyButton} />
             </View>
           ) : (
-            <RailSkeleton />
+            <BoardSkeleton />
           )
-        ) : days.length === 0 ? (
-          <View style={styles.empty}>
-            <Ionicons name="calendar-outline" size={40} color={c.ink3} />
-            <Txt variant="headline" style={{ marginTop: space.m }}>
-              Nothing left to book this week
-            </Txt>
-            <Txt variant="footnote" color={c.ink2} style={{ textAlign: 'center', marginTop: 4 }}>
-              Courts are booked at least a day ahead.
-            </Txt>
-            <Button label="See next week" tone="plain" onPress={() => onWeekChange('next')} style={{ marginTop: space.l, alignSelf: 'stretch' }} />
-          </View>
         ) : (
-          <View style={[styles.railCard, { backgroundColor: c.surface }]}>
-            {readOnly ? (
-              <View style={[styles.readOnlyNote, { backgroundColor: c.fill }]}>
-                <Ionicons name="lock-closed-outline" size={14} color={c.ink2} />
-                <Txt variant="footnote" color={c.ink2}>
-                  {date === today ? 'Today can’t be booked any more — book a day ahead.' : 'This day has passed.'}
-                </Txt>
+          <View onLayout={(e) => (boardY.current = e.nativeEvent.layout.y)}>
+            {nothingLeft && week === 'this' ? (
+              <View style={styles.pad}>
+                <Note tone="info">Nothing left to book this week. Courts are booked at least a day ahead.</Note>
+                <Button label="See next week" tone="tonal" size="m" onPress={() => onWeekChange('next')} style={styles.noteButton} />
+              </View>
+            ) : readOnly ? (
+              <View style={styles.pad}>
+                <Note tone="info">{readOnlyReason}</Note>
               </View>
             ) : null}
-            {grid.data.times.map((t, i) => {
-              const statuses = COURT_IDS.map((id) => grid.data!.status[date!]?.[t.start]?.[id] ?? 'unavailable');
-              const free = statuses.filter((s) => s === 'free').length;
-              const mine = statuses.includes('mine');
-              const canOpen = !readOnly && free > 0;
-              return (
-                <View key={t.start}>
-                  {i > 0 ? <Hairline inset={space.l} /> : null}
-                  <Press
-                    onPress={() => open(t.start)}
-                    disabled={!canOpen}
-                    style={[styles.row, { opacity: readOnly ? 0.55 : 1 }]}
-                    accessibilityLabel={`${t.start}, ${mine ? 'yours' : free === 0 ? 'full' : `${free} courts free`}`}
+
+            <View style={styles.board}>
+              {grid.data.times.map((t) => {
+                const armed = armedAt(tasks, date, t.start);
+                const statuses = COURT_IDS.map((id) => {
+                  const s: SlotStatus = grid.data!.status[date]?.[t.start]?.[id] ?? 'unavailable';
+                  return armed.has(id) && s !== 'mine' ? ('armed' as const) : s;
+                });
+                const free = statuses.filter((s) => s === 'free').length;
+                const mine = statuses.includes('mine');
+                const isArmed = statuses.includes('armed');
+                const open = expanded === t.start;
+                const dimmed = expanded !== null && !open;
+                const hour = t.start.endsWith(':00');
+
+                const label = mine ? 'Yours' : isArmed ? 'Armed' : free === 0 ? 'Full' : `${free} free`;
+                const labelColor = mine ? c.tertiary : isArmed ? c.primary : free === 0 ? c.outline : c.secondary;
+
+                return (
+                  <Animated.View
+                    key={t.start}
+                    layout={ROW_LAYOUT}
+                    style={[styles.rowWrap, { opacity: dimmed || readOnly ? 0.4 : 1 }]}
                   >
-                    <Txt variant="time" style={styles.rowTime} color={free === 0 && !mine ? c.ink3 : c.ink}>
-                      {t.start}
-                    </Txt>
-                    <CourtMarks statuses={statuses} />
-                    <Txt
-                      variant="footnote"
-                      color={mine ? c.cork : free === 0 ? c.ink3 : c.mat}
-                      style={[styles.rowLabel, { fontWeight: '600' }]}
-                    >
-                      {mine ? 'Yours' : free === 0 ? 'Full' : `${free} free`}
-                    </Txt>
-                    <Ionicons name="chevron-forward" size={16} color={canOpen ? c.ink3 : 'transparent'} />
-                  </Press>
+                    {open ? (
+                      <Animated.View
+                        entering={PICKER_IN}
+                        exiting={PICKER_OUT}
+                        style={[
+                          styles.card,
+                          {
+                            backgroundColor: c.surfaceContainerLow,
+                            borderColor: c.outlineVariant,
+                            borderWidth: 1,
+                            elevation: elevation.level2,
+                          },
+                        ]}
+                        onLayout={(e) => onPickerLayout(t.start, e)}
+                      >
+                        <SlotPicker
+                          grid={grid.data!}
+                          week={week}
+                          date={date}
+                          start={t.start}
+                          tasks={tasks}
+                          onCollapse={() => setExpanded(null)}
+                          onBooked={() => {
+                            setExpanded(null);
+                            grid.refresh();
+                          }}
+                          onArmed={() => {
+                            setExpanded(null);
+                            onArmed();
+                          }}
+                          onOpenSettings={onOpenSettings}
+                          onOpenSniper={onOpenSniper}
+                        />
+                      </Animated.View>
+                    ) : (
+                      <Press
+                        onPress={() => toggle(t.start)}
+                        disabled={readOnly || free === 0}
+                        style={styles.row}
+                        accessibilityLabel={`${t.start}, ${label}`}
+                        accessibilityHint={free > 0 && !readOnly ? 'Choose a court' : undefined}
+                        accessibilityState={{ expanded: false }}
+                      >
+                        <Txt variant="titleSmall" color={hour ? c.onSurface : c.onSurfaceVariant} style={styles.rowTime}>
+                          {t.start}
+                        </Txt>
+                        <View style={[styles.rowTrack, { borderTopColor: hour ? c.outlineVariant : c.surfaceContainerHighest }]}>
+                          <CourtMeter statuses={statuses} />
+                          <Txt variant="labelLarge" color={labelColor} style={[styles.rowLabel, styles.semibold]}>
+                            {label}
+                          </Txt>
+                          <Ionicons name="chevron-down" size={16} color={free > 0 && !readOnly ? c.onSurfaceVariant : 'transparent'} />
+                        </View>
+                      </Press>
+                    )}
+                  </Animated.View>
+                );
+              })}
+
+              <View style={styles.closing}>
+                <Txt variant="titleSmall" color={c.outline} style={styles.rowTime}>
+                  {CLOSING_TIME}
+                </Txt>
+                <View style={[styles.closingLine, { borderTopColor: c.outlineVariant }]}>
+                  <Txt variant="bodySmall" color={c.outline}>
+                    Courts close
+                  </Txt>
                 </View>
-              );
-            })}
+              </View>
+            </View>
           </View>
         )}
-      </ScrollView>
-
-      <Sheet ref={sheet} onClosed={() => setSlot(null)}>
-        {slot && grid.data ? (
-          <SlotSheet
-            grid={grid.data}
-            week={week}
-            date={slot.date}
-            start={slot.start}
-            onDone={(changed) => {
-              sheet.current?.close();
-              if (changed) grid.refresh();
-            }}
-            onOpenSettings={() => {
-              sheet.current?.close();
-              onOpenSettings();
-            }}
-            onOpenSniper={() => {
-              sheet.current?.close();
-              onOpenSniper();
-            }}
-          />
-        ) : null}
-      </Sheet>
+      </Animated.ScrollView>
     </View>
   );
 };
 
-function RailSkeleton() {
+function BoardSkeleton() {
   const c = useColors();
   return (
-    <View style={[styles.railCard, { backgroundColor: c.surface }]}>
-      {Array.from({ length: 8 }, (_, i) => (
+    <View style={styles.board} accessibilityLabel="Loading courts">
+      {Array.from({ length: 9 }, (_, i) => (
         <View key={i} style={styles.row}>
-          <View style={[styles.skel, { width: 54, backgroundColor: c.fill }]} />
-          <View style={[styles.skel, { width: 52, backgroundColor: c.fill }]} />
-          <View style={[styles.skel, { width: 44, marginLeft: 'auto', backgroundColor: c.fill }]} />
+          <View style={[styles.skel, { width: 44, backgroundColor: c.surfaceContainerHighest }]} />
+          <View style={[styles.rowTrack, { borderTopColor: c.surfaceContainerHighest }]}>
+            <View style={[styles.skel, { width: 62, backgroundColor: c.surfaceContainerHighest }]} />
+            <View style={[styles.skel, { width: 48, marginLeft: 'auto', backgroundColor: c.surfaceContainerHighest }]} />
+          </View>
         </View>
       ))}
     </View>
@@ -276,12 +376,15 @@ const DURATIONS = [
   { slots: 4, label: '2 hr' },
 ];
 
-function SlotSheet({
+function SlotPicker({
   grid,
   week,
   date,
   start,
-  onDone,
+  tasks,
+  onCollapse,
+  onBooked,
+  onArmed,
   onOpenSettings,
   onOpenSniper,
 }: {
@@ -289,7 +392,10 @@ function SlotSheet({
   week: WeekType;
   date: string;
   start: string;
-  onDone: (changed: boolean) => void;
+  tasks: SniperTask[];
+  onCollapse: () => void;
+  onBooked: () => void;
+  onArmed: () => void;
   onOpenSettings: () => void;
   onOpenSniper: () => void;
 }) {
@@ -307,25 +413,25 @@ function SlotSheet({
   }, []);
 
   const fits = (n: number) => minutes(start) + n * 30 <= minutes(CLOSING_TIME);
-  const length = fits(slots) ? slots : DURATIONS.filter((d) => fits(d.slots)).pop()?.slots ?? 1;
+  const length = fits(slots) ? slots : (DURATIONS.filter((d) => fits(d.slots)).pop()?.slots ?? 1);
   const end = hhmm(minutes(start) + length * 30);
   const starts = Array.from({ length }, (_, i) => hhmm(minutes(start) + i * 30));
 
-  // A court is free for the booking only if every half hour in it is free.
   const rangeStatus = (id: CourtId): SlotStatus => {
     const all = starts.map((s) => grid.status[date]?.[s]?.[id] ?? 'unavailable');
     if (all.every((s) => s === 'free')) return 'free';
     return all.includes('mine') ? 'mine' : 'taken';
   };
+
   const freeCourts = COURT_IDS.filter((id) => rangeStatus(id) === 'free');
   const chosen = court && freeCourts.includes(court) ? court : (freeCourts[0] ?? null);
 
-  // Pusat Sukan's terms: one session a day, two bookings a week on different days.
   const sniping = week === 'next';
-  const armed = sniping ? Sniper.tasks().filter((t) => t.status === 'armed' && grid.dates.includes(t.date)) : [];
+  const armed = sniping ? tasks.filter((t) => isLive(t) && !t.dryRun && grid.dates.includes(t.date)) : [];
   const mineDays = sniping
     ? [...new Set(armed.map((t) => t.date))]
     : grid.dates.filter((d) => Object.values(grid.status[d] ?? {}).some((byCourt) => Object.values(byCourt).includes('mine')));
+
   const warning = mineDays.includes(date)
     ? `You already have ${sniping ? 'a snipe armed' : 'a session'} on ${dayLabel(date)}. Pusat Sukan allows one session a day.`
     : mineDays.length >= 2
@@ -340,14 +446,14 @@ function SlotSheet({
       const res = await bookCourt({ date, start, end, court: chosen, anyCourt: false, event: prefs.event, pax: prefs.pax });
       if (res.status === 'booked') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        toast(res.message);
-        onDone(true);
+        toast(res.message || `Booked · ${dayLabel(date)} ${start}–${end}, Court ${chosen}`, 'booked');
+        onBooked();
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setProblem(res.message);
       }
     } catch (e: any) {
-      setProblem(e?.message || 'Something went wrong.');
+      setProblem(e?.message || 'Something went wrong. Nothing was booked.');
     } finally {
       setBusy(false);
     }
@@ -356,125 +462,102 @@ function SlotSheet({
   const arm = () => {
     if (!chosen) return;
     try {
-      scheduleSnipe({ date, start, end, court: chosen, anyCourt, event: prefs.event, pax: prefs.pax, measure: RECORD_ROLLOVER });
+      armSnipe({ date, start, end, court: chosen, anyCourt, event: prefs.event, pax: prefs.pax, measure: RECORD_ROLLOVER });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      toast(`Sniper armed · ${dayLabel(date)} ${start}–${end}, Court ${chosen}`, 'smash');
-      onDone(false);
+      toast(`Armed · ${dayLabel(date)} ${start}–${end}, Court ${chosen}`, 'armed');
+      onArmed();
     } catch (e: any) {
-      setProblem(e?.message || 'Couldn’t arm the sniper.');
+      setProblem(e?.message || 'Couldn’t arm sniper.');
     }
   };
 
   return (
     <View>
-      <Txt variant="caption" color={c.ink3}>
-        {dayLabel(date)}
-      </Txt>
-      <View style={styles.sheetTitle}>
-        <Txt variant="clock" style={{ fontSize: 44, lineHeight: 48 }}>
-          {start}
-        </Txt>
-        <Txt variant="time" color={c.ink3} style={{ marginBottom: 4 }}>
-          – {end}
-        </Txt>
-      </View>
+      <Press onPress={onCollapse} style={styles.pickerHead} accessibilityLabel={`${start} to ${end}, ${dayLabel(date)}. Close`} accessibilityState={{ expanded: true }}>
+        <View style={styles.flex}>
+          <Txt variant="headlineSmall" color={c.onSurface} numberOfLines={1}>
+            {start}–{end}
+          </Txt>
+          <Txt variant="bodySmall" color={c.onSurfaceVariant}>
+            {dayLabel(date)}
+            {sniping ? ` · fires ${shortDay(nextRolloverMs())}, 00:00:00` : ''}
+          </Txt>
+        </View>
+        <View style={[styles.collapse, { backgroundColor: c.surfaceContainerHighest }]}>
+          <Ionicons name="chevron-up" size={18} color={c.onSurfaceVariant} />
+        </View>
+      </Press>
 
-      <View style={styles.durations}>
-        {DURATIONS.map((d) => {
-          const ok = fits(d.slots);
-          const selected = d.slots === length;
-          return (
-            <Press
-              key={d.slots}
-              onPress={() => setSlots(d.slots)}
-              disabled={!ok}
-              haptic="selection"
-              style={[
-                styles.duration,
-                { backgroundColor: selected ? c.ink : c.fill, opacity: ok ? 1 : 0.35 },
-              ]}
-              accessibilityRole="radio"
-              accessibilityState={{ selected, disabled: !ok }}
-            >
-              <Txt variant="callout" color={selected ? c.surface : c.ink}>
-                {d.label}
-              </Txt>
-            </Press>
-          );
-        })}
-      </View>
+      {/* Duration selector */}
+      <Segmented
+        style={styles.durations}
+        options={DURATIONS.map((d) => ({ value: String(d.slots), label: d.label, disabled: !fits(d.slots) }))}
+        value={String(length)}
+        onChange={(v) => setSlots(Number(v))}
+      />
 
-      <View style={styles.courts}>
+      {/* Court tiles */}
+      <View style={styles.courts} accessibilityRole="radiogroup">
         {COURT_IDS.map((id) => (
-          <CourtTile
-            key={id}
-            label={`Court ${id}`}
-            status={rangeStatus(id)}
-            selected={id === chosen}
-            onPress={() => setCourt(id)}
-          />
+          <CourtTile key={id} court={id} status={rangeStatus(id)} selected={id === chosen} onPress={() => setCourt(id)} />
         ))}
       </View>
 
+      {/* Any court option */}
       {sniping ? (
-        <View style={[styles.optionRow, { backgroundColor: c.fill }]}>
+        <View style={[styles.option, { backgroundColor: c.surfaceContainerHighest }]}>
           <View style={styles.flex}>
-            <Txt variant="headline">Any court</Txt>
-            <Txt variant="footnote" color={c.ink2}>
-              If Court {chosen ?? '–'} is gone at 00:00, try the others one at a time. Never more than one.
+            <Txt variant="titleSmall" color={c.onSurface}>Any court fallback</Txt>
+            <Txt variant="bodySmall" color={c.onSurfaceVariant}>
+              If Court {chosen ?? '–'} is taken at midnight, try other courts sequentially.
             </Txt>
           </View>
-          <Switch value={anyCourt} onValueChange={setAnyCourt} trackColor={{ true: c.smash }} />
+          <Switch
+            value={anyCourt}
+            onValueChange={(v) => {
+              Haptics.selectionAsync();
+              setAnyCourt(v);
+            }}
+            trackColor={{ true: c.primary, false: c.outlineVariant }}
+            thumbColor={anyCourt ? c.onPrimary : c.surface}
+            accessibilityLabel="Any court fallback"
+          />
         </View>
       ) : null}
 
       {warning ? (
-        <View style={[styles.note, { backgroundColor: c.corkSoft }]}>
-          <Ionicons name="information-circle" size={16} color={c.cork} />
-          <Txt variant="footnote" color={c.ink} style={styles.flex}>
-            {warning}
-          </Txt>
-        </View>
+        <Note tone="warn" style={styles.noteGap}>
+          {warning}
+        </Note>
       ) : null}
       {problem ? (
-        <View style={[styles.note, { backgroundColor: c.smashSoft }]}>
-          <Ionicons name="alert-circle" size={16} color={c.smash} />
-          <Txt variant="footnote" color={c.ink} style={styles.flex}>
-            {problem}
-          </Txt>
-        </View>
+        <Note tone="error" style={styles.noteGap}>
+          {problem}
+        </Note>
       ) : null}
 
       {chosen ? (
         sniping ? (
-          <Button
-            tone="smash"
-            icon="locate"
-            label={`Arm sniper · Court ${chosen}`}
-            onPress={arm}
-            style={{ marginTop: space.l }}
-          />
+          <Button tone="gold" icon="locate" label={`Arm sniper · Court ${chosen}`} onPress={arm} style={styles.primary} />
         ) : (
-          <Button
-            label={`Book Court ${chosen} · ${start}–${end}`}
-            onPress={book}
-            loading={busy}
-            style={{ marginTop: space.l }}
-          />
+          <Button label={`Book Court ${chosen} · ${start}–${end}`} onPress={book} loading={busy} style={styles.primary} />
         )
       ) : (
-        <Button label="No court is free for that long" onPress={() => {}} disabled tone="plain" style={{ marginTop: space.l }} />
+        <Button label="No court is free for this duration" onPress={() => {}} disabled tone="tonal" style={styles.primary} />
       )}
 
-      <Press onPress={onOpenSettings} style={styles.prefsLink} accessibilityRole="button">
-        <Txt variant="footnote" color={c.ink3}>
-          As “{prefs.event}”, {prefs.pax} players · Change
+      <Press onPress={onOpenSettings} style={styles.link} accessibilityRole="link" accessibilityLabel="Change event name and players">
+        <Txt variant="bodySmall" color={c.onSurfaceVariant}>
+          As “{prefs.event}”, {prefs.pax} {prefs.pax === 1 ? 'player' : 'players'} ·{' '}
+          <Txt variant="labelSmall" color={c.primary} style={styles.semibold}>
+            Change
+          </Txt>
         </Txt>
       </Press>
       {sniping ? (
-        <Press onPress={onOpenSniper} style={styles.prefsLink}>
-          <Txt variant="footnote" color={c.ink3}>
-            Fires Monday 00:00:00 · How the sniper works
+        <Press onPress={onOpenSniper} style={styles.linkTight} accessibilityRole="link">
+          <Txt variant="labelSmall" color={c.primary} style={styles.semibold}>
+            How the sniper works
           </Txt>
         </Press>
       ) : null}
@@ -486,114 +569,161 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  semibold: {
+    fontWeight: '600',
+  },
+  tabular: {
+    fontVariant: ['tabular-nums'],
+  },
   pad: {
     paddingHorizontal: space.l,
   },
-  daysScroll: {
-    flexGrow: 0,
-    marginTop: space.m,
-  },
   days: {
-    paddingHorizontal: space.l,
+    flexDirection: 'row',
     gap: space.s,
+    paddingHorizontal: space.l,
+    marginTop: space.l,
   },
-  dayChip: {
-    width: 58,
-    height: 62,
-    borderRadius: radius.m,
+  day: {
+    flex: 1,
+    height: 68,
+    borderRadius: shape.medium,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
   },
-  earlier: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
+  struck: {
+    textDecorationLine: 'line-through',
+  },
+  dayMarker: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 2,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.s,
     marginTop: space.m,
-    marginBottom: space.s,
+    marginBottom: space.xs,
   },
-  rail: {
+  scroll: {
+    paddingTop: space.s,
+    paddingBottom: TAB_CLEARANCE + space.xl,
+  },
+  board: {
     paddingHorizontal: space.l,
-    paddingBottom: space.xxl,
+    marginTop: space.s,
   },
-  railCard: {
-    borderRadius: radius.l,
-    overflow: 'hidden',
-  },
-  readOnlyNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.s,
-    paddingHorizontal: space.l,
-    paddingVertical: space.s,
+  rowWrap: {
+    marginVertical: 0,
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.l,
-    paddingHorizontal: space.l,
-    minHeight: 52,
+    alignItems: 'stretch',
+    minHeight: 56,
   },
   rowTime: {
-    width: 54,
+    width: GUTTER,
+    paddingTop: 16,
+  },
+  rowTrack: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.m,
+    borderTopWidth: 1,
+    paddingRight: space.xs,
   },
   rowLabel: {
     flex: 1,
     textAlign: 'right',
   },
-  skel: {
-    height: 14,
-    borderRadius: 7,
-  },
-  empty: {
-    alignItems: 'center',
-    paddingVertical: space.xxl,
-    paddingHorizontal: space.xl,
-  },
-  sheetTitle: {
+  closing: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: space.s,
-    marginTop: 2,
+    minHeight: 44,
   },
-  durations: {
-    flexDirection: 'row',
-    gap: space.s,
-    marginTop: space.l,
-  },
-  duration: {
+  closingLine: {
     flex: 1,
-    height: 38,
-    borderRadius: 10,
+    borderTopWidth: 1,
+    paddingTop: 16,
+    alignItems: 'flex-end',
+    paddingRight: space.xs,
+  },
+  card: {
+    borderRadius: shape.large,
+    padding: space.l,
+    marginVertical: space.s,
+  },
+  pickerHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.m,
+  },
+  collapse: {
+    width: 36,
+    height: 36,
+    borderRadius: shape.full,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  durations: {
+    marginTop: space.l,
   },
   courts: {
     flexDirection: 'row',
     gap: space.m,
-    marginTop: space.xl,
+    marginTop: space.l,
+    paddingHorizontal: 2,
   },
-  optionRow: {
+  option: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.m,
     padding: space.m,
-    borderRadius: radius.m,
+    paddingLeft: space.l,
+    borderRadius: shape.medium,
     marginTop: space.l,
   },
-  note: {
-    flexDirection: 'row',
-    gap: space.s,
-    padding: space.m,
-    borderRadius: radius.m,
+  noteGap: {
     marginTop: space.m,
   },
-  prefsLink: {
+  primary: {
+    marginTop: space.l,
+  },
+  link: {
     alignItems: 'center',
-    paddingTop: space.m,
+    paddingTop: space.l,
+    paddingBottom: space.xs,
+  },
+  linkTight: {
+    alignItems: 'center',
+    paddingVertical: space.s,
+  },
+  skel: {
+    height: 16,
+    borderRadius: shape.small,
+    marginTop: 20,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: space.xxxl,
+    paddingHorizontal: space.xl,
+  },
+  emptyTitle: {
+    marginTop: space.l,
+  },
+  emptyText: {
+    textAlign: 'center',
+    marginTop: space.xs,
+  },
+  emptyButton: {
+    marginTop: space.xl,
+    alignSelf: 'stretch',
+  },
+  noteButton: {
+    marginTop: space.m,
+    alignSelf: 'flex-start',
   },
 });

@@ -1,45 +1,75 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
+import { RefreshControlProps, StyleSheet, View } from 'react-native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  Keyframe,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Press, Txt } from '../ui';
-import { radius, space, useColors } from '../theme';
+import { IconName, Press, Txt } from '../ui';
+import { EASE_DECELERATE, elevation, shape, space, useColors } from '../theme';
 import { requestSignIn, useSession } from '../services/session';
 import { SlotStatus } from '../types';
 
-// ---------------------------------------------------------------- Session pill
+// ---------------------------------------------------------------- Screen Chrome & Top App Bar
 
-/** Where the session stands, in every screen's header; tap it to sign in. */
-export function SessionPill({ onOpenSettings }: { onOpenSettings?: () => void }) {
+export const TAB_CLEARANCE = 88;
+
+/**
+ * Material 3 Account / Session Button
+ * Tonal chip indicating Google / UMPoint authentication state.
+ */
+export function AccountButton({ onOpenSettings }: { onOpenSettings: () => void }) {
   const c = useColors();
   const session = useSession();
-  const look =
-    session === 'signed_in'
-      ? { text: 'Signed in', color: c.mat, bg: c.matSoft }
-      : session === 'signed_out'
-        ? { text: 'Sign in', color: c.cork, bg: c.corkSoft }
-        : session === 'offline'
-          ? { text: 'Offline', color: c.ink2, bg: c.fill }
-          : { text: 'Checking', color: c.ink3, bg: c.fill };
+
+  if (session === 'signed_out') {
+    return (
+      <Press
+        onPress={() => requestSignIn()}
+        style={[styles.signIn, { backgroundColor: c.primary }]}
+        accessibilityLabel="Sign in to UMPoint"
+      >
+        <Ionicons name="log-in-outline" size={18} color={c.onPrimary} />
+        <Txt variant="labelLarge" color={c.onPrimary} style={styles.bold}>
+          Sign in
+        </Txt>
+      </Press>
+    );
+  }
+
+  const dot = session === 'signed_in' ? c.secondary : session === 'offline' ? c.error : c.outline;
+  const label =
+    session === 'signed_in' ? 'Settings, signed in' : session === 'offline' ? 'Settings, can’t reach UMPoint' : 'Settings';
+
   return (
     <Press
-      onPress={() => (session === 'signed_in' ? onOpenSettings?.() : requestSignIn())}
-      style={[styles.pill, { backgroundColor: look.bg }]}
-      accessibilityLabel={`UMPoint: ${look.text}`}
+      onPress={onOpenSettings}
+      style={[styles.account, { backgroundColor: c.surfaceContainerHigh }]}
+      accessibilityLabel={label}
     >
-      <View style={[styles.dot, { backgroundColor: look.color }]} />
-      <Txt variant="footnote" color={look.color} style={{ fontWeight: '600' }}>
-        {look.text}
-      </Txt>
+      <Ionicons name={session === 'offline' ? 'cloud-offline-outline' : 'person'} size={18} color={c.onSurfaceVariant} />
+      <View style={[styles.accountDot, { backgroundColor: dot, borderColor: c.surface }]} />
     </Press>
   );
 }
 
-export function ScreenHeader({ title, right }: { title: string; right?: React.ReactNode }) {
+export function SessionPill({ onOpenSettings }: { onOpenSettings: () => void }) {
+  return <AccountButton onOpenSettings={onOpenSettings} />;
+}
+
+/**
+ * Material 3 Top App Bar
+ */
+export function LargeHeader({ title, right }: { title: string; right?: React.ReactNode }) {
+  const c = useColors();
   return (
     <View style={styles.header}>
-      <Txt variant="largeTitle" accessibilityRole="header">
+      <Txt variant="headlineMedium" color={c.onSurface} accessibilityRole="header" numberOfLines={1} style={styles.headerTitle}>
         {title}
       </Txt>
       {right}
@@ -47,25 +77,101 @@ export function ScreenHeader({ title, right }: { title: string; right?: React.Re
   );
 }
 
-// ---------------------------------------------------------------- Courts
+export function ScreenHeader({ title, right }: { title: string; right?: React.ReactNode }) {
+  return <LargeHeader title={title} right={right} />;
+}
 
-/** A court seen from above: the mat, its outline, the net and the short service lines. */
+/**
+ * Material 3 Scrollable Container with collapsible Top App Bar
+ */
+export function ScrollScreen({
+  title,
+  right,
+  refreshControl,
+  children,
+}: {
+  title: string;
+  right?: React.ReactNode;
+  refreshControl?: React.ReactElement<RefreshControlProps>;
+  children: React.ReactNode;
+}) {
+  const c = useColors();
+  const scrollY = useSharedValue(0);
+
+  const onScroll = useAnimatedScrollHandler((e) => {
+    scrollY.set(e.contentOffset.y);
+  });
+
+  const barStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.get(), [24, 48], [0, 1], Extrapolation.CLAMP),
+    elevation: interpolate(scrollY.get(), [24, 48], [0, elevation.level2], Extrapolation.CLAMP),
+  }));
+
+  return (
+    <View style={[styles.flex, { backgroundColor: c.surface }]}>
+      <Animated.ScrollView
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        refreshControl={refreshControl}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <LargeHeader title={title} right={right} />
+        {children}
+      </Animated.ScrollView>
+      <Animated.View pointerEvents="none" style={[styles.compactBar, { backgroundColor: c.surfaceContainer }, barStyle]}>
+        <Txt variant="titleLarge" color={c.onSurface}>{title}</Txt>
+      </Animated.View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- Material 3 Court Status & Tiles
+
+const meterColor = (s: SlotStatus | 'armed', c: ReturnType<typeof useColors>) =>
+  s === 'free' ? c.secondary : s === 'mine' ? c.tertiary : s === 'armed' ? c.primary : c.outlineVariant;
+
+export function CourtMeter({ statuses }: { statuses: (SlotStatus | 'armed')[] }) {
+  const c = useColors();
+  return (
+    <View style={[styles.meter, { backgroundColor: c.surfaceContainerHighest }]} accessible={false}>
+      {statuses.map((s, i) => (
+        <View key={i} style={[styles.meterCell, { backgroundColor: meterColor(s, c) }]} />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Material 3 Court Tile
+ * Clean schematic view of badminton court with M3 state styling.
+ */
 export function CourtTile({
   status,
   selected,
-  label,
+  court,
   onPress,
 }: {
   status: SlotStatus;
   selected: boolean;
-  label: string;
+  court: string;
   onPress?: () => void;
 }) {
   const c = useColors();
   const free = status === 'free';
-  const bg = free ? c.mat : status === 'mine' ? c.cork : c.taken;
-  const line = free || status === 'mine' ? c.courtLine : c.surface;
-  const caption = status === 'free' ? 'Free' : status === 'mine' ? 'Yours' : status === 'closed' ? 'Closed' : 'Taken';
+  const mine = status === 'mine';
+
+  const bg = free
+    ? selected
+      ? c.secondaryContainer
+      : c.surfaceContainerLow
+    : mine
+      ? c.tertiaryContainer
+      : c.surfaceContainerHighest;
+
+  const line = free || mine ? (selected ? c.onSecondaryContainer : c.outline) : c.outlineVariant;
+  const caption = free ? 'Free' : mine ? 'Yours' : status === 'closed' ? 'Closed' : 'Taken';
+
   return (
     <Press
       onPress={onPress}
@@ -73,94 +179,139 @@ export function CourtTile({
       haptic="selection"
       style={styles.courtWrap}
       accessibilityRole="radio"
-      accessibilityLabel={`${label}, ${caption}`}
+      accessibilityLabel={`Court ${court}, ${caption}`}
       accessibilityState={{ selected, disabled: !free }}
     >
       <View
         style={[
           styles.court,
-          { backgroundColor: bg, borderColor: selected ? c.ink : 'transparent' },
+          {
+            backgroundColor: bg,
+            borderColor: selected ? c.secondary : c.outlineVariant,
+            borderWidth: selected ? 2 : 1,
+          },
         ]}
       >
-        <View style={[styles.courtOutline, { borderColor: line, opacity: free ? 0.9 : 0.5 }]}>
-          <View style={[styles.serviceLine, { top: '36%', backgroundColor: line }]} />
+        <View style={[styles.courtOutline, { borderColor: line }]}>
+          <View style={[styles.serviceLine, { top: '35%', backgroundColor: line }]} />
           <View style={[styles.net, { backgroundColor: line }]} />
-          <View style={[styles.serviceLine, { bottom: '36%', backgroundColor: line }]} />
-          <View style={[styles.centreLine, { top: 0, bottom: '64%', backgroundColor: line }]} />
-          <View style={[styles.centreLine, { bottom: 0, top: '64%', backgroundColor: line }]} />
+          <View style={[styles.serviceLine, { bottom: '35%', backgroundColor: line }]} />
+          <View style={[styles.centreLine, { top: 0, bottom: '65%', backgroundColor: line }]} />
+          <View style={[styles.centreLine, { bottom: 0, top: '65%', backgroundColor: line }]} />
         </View>
         {selected ? (
-          <View style={[styles.check, { backgroundColor: c.ink }]}>
-            <Ionicons name="checkmark" size={14} color={c.surface} />
+          <View style={[styles.check, { backgroundColor: c.secondary }]}>
+            <Ionicons name="checkmark" size={13} color={c.onSecondary} />
           </View>
         ) : null}
       </View>
-      <Txt variant="callout" style={{ marginTop: 6 }}>
-        {label}
+      <Txt variant="titleSmall" color={free ? c.onSurface : c.outline} style={[styles.courtLabel, selected && styles.bold]}>
+        Court {court}
       </Txt>
-      <Txt variant="footnote" color={free ? c.mat : status === 'mine' ? c.cork : c.ink3}>
+      <Txt variant="bodySmall" color={free ? (selected ? c.secondary : c.onSurfaceVariant) : mine ? c.tertiary : c.outline}>
         {caption}
       </Txt>
     </Press>
   );
 }
 
-/** The four courts at one time, as small marks in a row. */
-export function CourtMarks({ statuses }: { statuses: SlotStatus[] }) {
+// ---------------------------------------------------------------- Material 3 Empty State
+
+export function Empty({
+  icon,
+  title,
+  text,
+  action,
+}: {
+  icon: IconName;
+  title: string;
+  text: string;
+  action?: React.ReactNode;
+}) {
   const c = useColors();
   return (
-    <View style={styles.marks} accessible={false}>
-      {statuses.map((s, i) => (
-        <View
-          key={i}
-          style={[
-            styles.mark,
-            s === 'free'
-              ? { backgroundColor: c.mat }
-              : s === 'mine'
-                ? { backgroundColor: c.cork }
-                : { backgroundColor: 'transparent', borderColor: c.taken, borderWidth: 1.5 },
-          ]}
-        />
-      ))}
+    <View style={styles.emptyContainer}>
+      <View style={[styles.emptyIconCircle, { backgroundColor: c.surfaceContainerHighest }]}>
+        <Ionicons name={icon} size={36} color={c.onSurfaceVariant} />
+      </View>
+      <Txt variant="titleMedium" color={c.onSurface} style={styles.emptyTitle}>
+        {title}
+      </Txt>
+      <Txt variant="bodyMedium" color={c.onSurfaceVariant} style={styles.emptyText}>
+        {text}
+      </Txt>
+      {action ? <View style={styles.emptyAction}>{action}</View> : null}
     </View>
   );
 }
 
-// ---------------------------------------------------------------- Toast
+// ---------------------------------------------------------------- Material 3 Snackbar (Toast)
 
-type Toast = { id: number; text: string; tone: 'mat' | 'smash' | 'plain' };
-const ToastContext = createContext<(text: string, tone?: Toast['tone']) => void>(() => {});
+export type ToastTone = 'booked' | 'armed' | 'plain' | 'error';
+type Toast = { id: number; text: string; tone: ToastTone };
+const ToastContext = createContext<(text: string, tone?: ToastTone) => void>(() => {});
 
 export const useToast = () => useContext(ToastContext);
 
-/** A short line from the top edge after something finishes, instead of a dialog to dismiss. */
+const TOAST_IN = new Keyframe({
+  0: { opacity: 0, transform: [{ translateY: 16 }, { scale: 0.95 }] },
+  100: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }], easing: EASE_DECELERATE },
+}).duration(240);
+
+const TOAST_OUT = new Keyframe({
+  0: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] },
+  100: { opacity: 0, transform: [{ translateY: 12 }, { scale: 0.98 }], easing: EASE_DECELERATE },
+}).duration(180);
+
+const TOAST_ICON: Record<ToastTone, IconName> = {
+  booked: 'checkmark-circle',
+  armed: 'locate',
+  plain: 'information-circle',
+  error: 'alert-circle',
+};
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const [toast, setToast] = useState<Toast | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const show = useCallback((text: string, tone: Toast['tone'] = 'mat') => {
+
+  const show = useCallback((text: string, tone: ToastTone = 'plain') => {
     if (timer.current) clearTimeout(timer.current);
     setToast({ id: Date.now(), text, tone });
-    timer.current = setTimeout(() => setToast(null), 3200);
+    timer.current = setTimeout(() => setToast(null), tone === 'error' ? 5000 : 3400);
   }, []);
-  const accent = toast?.tone === 'smash' ? c.smash : toast?.tone === 'plain' ? c.ink2 : c.mat;
+
+  const iconColor =
+    toast?.tone === 'armed'
+      ? c.tertiary
+      : toast?.tone === 'booked'
+        ? c.secondary
+        : toast?.tone === 'error'
+          ? c.error
+          : c.inversePrimary;
+
   return (
     <ToastContext.Provider value={show}>
       {children}
       {toast ? (
         <Animated.View
           key={toast.id}
-          entering={FadeInUp.duration(220)}
-          exiting={FadeOutUp.duration(180)}
-          style={[styles.toast, { top: insets.top + space.s, backgroundColor: c.surfaceRaised }]}
-          accessibilityLiveRegion="polite"
+          entering={TOAST_IN}
+          exiting={TOAST_OUT}
+          style={[styles.toastWrap, { bottom: Math.max(insets.bottom, 16) + 84 }]}
+          pointerEvents="box-none"
         >
-          <View style={[styles.toastBar, { backgroundColor: accent }]} />
-          <Txt variant="callout" style={{ flex: 1 }}>
-            {toast.text}
-          </Txt>
+          <Press
+            onPress={() => setToast(null)}
+            style={[styles.toast, { backgroundColor: c.inverseSurface }]}
+            accessibilityLabel={`${toast.text}. Dismiss`}
+          >
+            <Ionicons name={TOAST_ICON[toast.tone]} size={20} color={iconColor} />
+            <Txt variant="bodyMedium" color={c.inverseOnSurface} style={styles.toastText} accessibilityLiveRegion="polite">
+              {toast.text}
+            </Txt>
+          </Press>
         </Animated.View>
       ) : null}
     </ToastContext.Provider>
@@ -168,26 +319,71 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+  flex: {
+    flex: 1,
   },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
+  bold: {
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: space.l,
-    paddingTop: space.s,
+    paddingTop: space.m,
     paddingBottom: space.m,
+    minHeight: 64,
+  },
+  headerTitle: {
+    flexShrink: 1,
+  },
+  scrollContent: {
+    paddingBottom: TAB_CLEARANCE + space.xl,
+  },
+  compactBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  account: {
+    width: 40,
+    height: 40,
+    borderRadius: shape.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountDot: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+  },
+  signIn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: shape.full,
+  },
+  meter: {
+    flexDirection: 'row',
+    width: 56,
+    height: 12,
+    borderRadius: shape.full,
+    padding: 2,
+    gap: 2,
+  },
+  meterCell: {
+    flex: 1,
+    borderRadius: shape.full,
   },
   courtWrap: {
     flex: 1,
@@ -195,74 +391,93 @@ const styles = StyleSheet.create({
   },
   court: {
     width: '100%',
-    aspectRatio: 0.56,
-    borderRadius: radius.s,
-    borderWidth: 2.5,
-    padding: 7,
+    aspectRatio: 0.62,
+    borderRadius: shape.small,
+    padding: 6,
+    justifyContent: 'center',
   },
   courtOutline: {
-    flex: 1,
-    borderWidth: 1.5,
+    ...StyleSheet.absoluteFill,
+    margin: 6,
+    borderWidth: 1.2,
     borderRadius: 2,
   },
   net: {
     position: 'absolute',
-    left: -4,
-    right: -4,
+    left: -3,
+    right: -3,
     top: '50%',
-    height: 2.5,
+    height: 2,
     marginTop: -1,
   },
   serviceLine: {
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 1.5,
+    height: 1,
   },
   centreLine: {
     position: 'absolute',
     left: '50%',
-    width: 1.5,
-    marginLeft: -0.75,
+    width: 1,
+    marginLeft: -0.5,
   },
   check: {
     position: 'absolute',
-    top: -8,
-    right: -8,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  marks: {
-    flexDirection: 'row',
-    gap: 4,
+  courtLabel: {
+    marginTop: space.s,
   },
-  mark: {
-    width: 10,
-    height: 16,
-    borderRadius: 3,
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: space.xxxl,
+    paddingHorizontal: space.xl,
   },
-  toast: {
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space.l,
+  },
+  emptyTitle: {
+    textAlign: 'center',
+    marginBottom: space.s,
+  },
+  emptyText: {
+    textAlign: 'center',
+  },
+  emptyAction: {
+    marginTop: space.l,
+  },
+  toastWrap: {
     position: 'absolute',
     left: space.l,
     right: space.l,
+    alignItems: 'center',
+  },
+  toast: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.m,
+    minHeight: 48,
     paddingVertical: space.m,
-    paddingRight: space.l,
-    borderRadius: radius.m,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-    overflow: 'hidden',
+    paddingHorizontal: space.l,
+    borderRadius: shape.small,
+    elevation: elevation.level3,
+    maxWidth: 480,
+    width: '100%',
   },
-  toastBar: {
-    width: 4,
-    alignSelf: 'stretch',
+  toastText: {
+    flex: 1,
   },
 });

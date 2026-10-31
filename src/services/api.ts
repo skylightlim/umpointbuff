@@ -1,4 +1,4 @@
-import { BookResult, SlotRequest, Sniper, SniperTask } from '../../modules/umpoint-sniper';
+import { BookResult, SlotRequest, Sniper } from '../../modules/umpoint-sniper';
 import { Booking, CourtId, GridResponse, WeekGrid, WeekType } from '../types';
 import { requestSignIn, withSession } from './session';
 import { CLOSING_TIME, fetchBookings, fetchGrid, minutes } from './umpointClient';
@@ -39,8 +39,3 @@ export async function bookCourt(req: SlotRequest): Promise<BookResult> {
   if (res.status === 'signed_out') requestSignIn();
   return res;
 }
-
-/** Arms a snipe for Monday 00:00 MYT of the slot's week. */
-export const scheduleSnipe = (req: SlotRequest): SniperTask => Sniper.arm(req);
-
-export const getTasks = (): SniperTask[] => Sniper.tasks();

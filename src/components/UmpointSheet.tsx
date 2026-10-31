@@ -6,22 +6,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { Sniper } from '../../modules/umpoint-sniper';
 import { markSignedIn } from '../services/session';
 import { BASE_URL } from '../services/umpointClient';
-import { Press, Txt } from '../ui';
-import { radius, space, useColors } from '../theme';
+import { IconButton, Txt } from '../ui';
+import { shape, space, useColors } from '../theme';
 
 interface Props {
   visible: boolean;
-  /** signin: UMPoint's login page; dashboard: UMPoint's own bookings page (to cancel there). */
   mode: 'signin' | 'dashboard';
-  /** Shown above the page, e.g. why the sniper needs a sign-in. */
   reason?: string;
   onClose: () => void;
 }
 
-/**
- * UMPoint in a WebView. Its cookies are the app's session: fetch and the Kotlin sniper read the
- * same store. The user agent drops the WebView marker, since Google refuses sign-in in WebViews.
- */
 export const UmpointSheet: React.FC<Props> = ({ visible, mode, reason, onClose }) => {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -40,31 +34,33 @@ export const UmpointSheet: React.FC<Props> = ({ visible, mode, reason, onClose }
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={[styles.container, { backgroundColor: c.bg, paddingTop: insets.top }]}>
-        <View style={[styles.topBar, { borderBottomColor: c.hairline }]}>
-          <Press onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close">
-            <Ionicons name="close" size={24} color={c.ink} />
-          </Press>
-          <Txt variant="headline">{mode === 'signin' ? 'Sign in to UMPoint' : 'My UMPoint bookings'}</Txt>
-          <View style={styles.closeBtn} />
+      <View style={[styles.container, { backgroundColor: c.surface, paddingTop: insets.top }]}>
+        <View style={[styles.topBar, { borderBottomColor: c.outlineVariant, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <IconButton icon="close" label="Close" onPress={onClose} size={40} />
+          <Txt variant="titleMedium" color={c.onSurface}>
+            {mode === 'signin' ? 'Sign in to UMPoint' : 'My UMPoint Bookings'}
+          </Txt>
+          <View style={styles.closePlaceholder} />
         </View>
 
         {reason ? (
-          <View style={[styles.reason, { backgroundColor: c.smashSoft }]}>
-            <Ionicons name="alarm-outline" size={18} color={c.smash} />
-            <Txt variant="footnote" style={styles.flex}>
+          <View style={[styles.reason, { backgroundColor: c.errorContainer }]}>
+            <Ionicons name="alarm-outline" size={20} color={c.error} />
+            <Txt variant="bodySmall" color={c.onErrorContainer} style={styles.flex}>
               {reason}
             </Txt>
           </View>
         ) : null}
-        <Txt variant="footnote" color={c.ink2} style={styles.hint}>
+
+        <Txt variant="bodySmall" color={c.onSurfaceVariant} style={styles.hint}>
           {mode === 'signin'
             ? 'Tap “UM Staff and Student” and sign in with your SiswaMail.'
-            : 'This is UMPoint itself. Cancel here and the app shows the change.'}
+            : 'Live UMPoint dashboard. Cancelling here updates your local bookings immediately.'}
         </Txt>
+
         {blocked ? (
-          <Txt variant="footnote" color={c.smash} style={styles.hint}>
-            Google refused to sign in inside the app. Tell the developer — this needs a fix.
+          <Txt variant="bodySmall" color={c.error} style={styles.hint}>
+            Google refused to sign in inside the app. Check network or WebView user agent.
           </Txt>
         ) : null}
 
@@ -83,8 +79,8 @@ export const UmpointSheet: React.FC<Props> = ({ visible, mode, reason, onClose }
             />
           ) : null}
           {loading ? (
-            <View style={[styles.loading, { backgroundColor: c.bg }]}>
-              <ActivityIndicator size="large" color={c.mat} />
+            <View style={[styles.loading, { backgroundColor: c.surface }]}>
+              <ActivityIndicator size="large" color={c.primary} />
             </View>
           ) : null}
         </View>
@@ -104,24 +100,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: space.s,
-    paddingVertical: space.s,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: space.m,
+    height: 56,
   },
-  closeBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+  closePlaceholder: {
+    width: 40,
   },
   reason: {
     flexDirection: 'row',
-    gap: space.s,
+    gap: space.m,
     alignItems: 'center',
     margin: space.m,
     marginBottom: 0,
     padding: space.m,
-    borderRadius: radius.m,
+    borderRadius: shape.medium,
   },
   hint: {
     paddingHorizontal: space.l,
