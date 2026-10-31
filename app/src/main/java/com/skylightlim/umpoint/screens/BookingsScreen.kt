@@ -1,6 +1,5 @@
 package com.skylightlim.umpoint.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,11 +8,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -24,9 +25,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -53,6 +54,7 @@ import com.skylightlim.umpoint.ui.components.ScreenFrame
 import com.skylightlim.umpoint.ui.components.SectionLabel
 import com.skylightlim.umpoint.ui.components.SegmentGap
 import com.skylightlim.umpoint.ui.components.bounceIn
+import com.skylightlim.umpoint.ui.components.fadingEdges
 import com.skylightlim.umpoint.ui.components.segmentShape
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 
@@ -78,13 +80,15 @@ fun BookingsScreen(
     }
 
     ScreenFrame("Bookings", session, onOpenSettings) {
+        val listState = rememberLazyListState()
         RefreshBox(
             refreshing = bookings.refreshing,
             onRefresh = { vm.refreshBookings() },
             modifier = Modifier.weight(1f),
         ) {
             LazyColumn(
-                Modifier.fillMaxSize(),
+                Modifier.fillMaxSize().fadingEdges(listState),
+                state = listState,
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = LocalBottomClearance.current),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
@@ -92,11 +96,12 @@ fun BookingsScreen(
                     Text(
                         when {
                             bookings.refreshing -> "Updating…"
+                            bookings.error != null && list == null -> "From your UMPoint dashboard."
                             bookings.error != null -> "Couldn’t refresh: ${bookings.error}"
                             else -> "From your UMPoint dashboard. ${ago(bookings.updatedAt, now)}"
                         },
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (bookings.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (bookings.error != null && list != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
@@ -188,16 +193,16 @@ private fun BookingCard(booking: Booking, slot: BookedSlot?, shape: Shape, onCan
                 }
             }
             if (booking.cancellable) {
-                OutlinedButton(
+                // It only opens UMPoint's page, where the real decision is, so it stays quiet here.
+                TextButton(
                     onClick = onCancel,
                     shapes = ButtonDefaults.shapes(),
-                    modifier = Modifier.padding(top = 12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),
-                    border = BorderStroke(1.dp, colors.error),
+                    modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = colors.onSurfaceVariant),
                 ) {
-                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
                     Text("Cancel on UMPoint")
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
             }
         }

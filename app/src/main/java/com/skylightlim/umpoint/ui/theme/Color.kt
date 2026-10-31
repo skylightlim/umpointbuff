@@ -44,13 +44,14 @@ data class CourtColors(
 
 internal val LightCourts = CourtColors(
     free = Color(0xFF006D44),
-    freeContainer = Color(0xFF8EF7B4),
+    freeContainer = Color(0xFFB4F1CB),
     onFreeContainer = Color(0xFF002111),
     mine = Color(0xFF00639B),
     mineContainer = Color(0xFFD0E4FF),
     onMineContainer = Color(0xFF001D32),
-    armed = Color(0xFF7B5800),
-    onArmed = Color.White,
+    // The same bright amber as dark mode, with dark ink: a darker amber for white text reads as brown.
+    armed = Color(0xFFF5BF46),
+    onArmed = Color(0xFF2B1D00),
     armedContainer = Color(0xFFFFDEA1),
     onArmedContainer = Color(0xFF261900),
 )

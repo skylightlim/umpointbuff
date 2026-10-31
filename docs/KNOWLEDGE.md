@@ -49,6 +49,8 @@ API details learned while compiling:
 - `ToggleButton` colours come from `ToggleButtonDefaults.colors(...)`.
 - `AnimatedVisibility` inside a `Box` inside a `Column` hits a scope error. Put it in its own composable.
 - `androidx.graphics.shapes.Morph.toPath(progress)` gives a path in a unit square, so scale it to the size.
+- Back handlers run newest-registered first, not top-of-screen first. A root handler that's merely enabled later loses to one already on screen, so an overlay's handler goes inside the overlay's own composable. The first version of Settings got this wrong: Back went to the court step hidden underneath.
+- Driving `AnimatedContent` with a `SeekableTransitionState` works with `sharedBounds`. When a back gesture is cancelled, animate the fraction to 0 with `seekTo`, then `snapTo` the old state, the way Navigation Compose does.
 - To check a signature, run `javap` on `classes.jar` from `material3.aar` in `~/.gradle/caches/modules-2/files-2.1/androidx.compose.material3/material3-android/<version>/`.
 
 ## What we took from Minus and Material Capsule
@@ -79,13 +81,16 @@ Minus also bundles a `TopSheet`, swipe actions and tutorial hints worth reading 
 
 | Control | x, y |
 |---|---|
-| Tabs: Courts, Sniper, Bookings | 275, 540, 800 at y 2200 |
-| Avatar | 1007, 217 |
-| 12:00 time chip | 667, 1220 |
-| Court 3, after picking a time | 668, 1517 |
-| Arm button, after picking a court | 580, 2231 |
+| Tabs: Courts, Sniper, Bookings | 277, 541, 803 at y 2200 |
+| Avatar | 1007, 222 |
+| 12:00 time chip | 667, 1050 |
+| Court 3, after picking a time | 668, 1281 |
+| Arm button, after picking a court | 565, 2231 |
 
 - The app's private files can be read with `run-as` only on debug builds.
+- A debug build is slow: its first frame takes about 4 seconds on a headless software-rendered emulator, and `uiautomator dump` fails until then. Wait for the dump before tapping, and judge smoothness only on a phone.
+- `input motionevent DOWN/MOVE/UP` holds a back gesture part-way, so it can be screenshotted, then cancelled or committed.
+- To judge motion at real speed, build the debug variant temporarily with R8 on and `isDebuggable = false`, let the demo gate through, then run `cmd package compile -m speed -f`. On the 6a that starts in 225 ms and misses about 2% of frames during the time-to-court morph (1 Nov 2026). The first morph after launch can show one blank frame while the court step composes for the first time.
 - The sign-in step showed a spinner for at least 6 seconds before its error during the outage, so wait about 25 seconds before capturing it.
 
 ## Sniper behaviour worth remembering
