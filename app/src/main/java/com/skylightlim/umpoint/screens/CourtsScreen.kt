@@ -2,12 +2,15 @@ package com.skylightlim.umpoint.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.EventBusy
 import androidx.compose.material.icons.rounded.GpsFixed
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
@@ -45,13 +50,17 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skylightlim.umpoint.AppViewModel
@@ -80,10 +90,12 @@ import com.skylightlim.umpoint.sniper.Umpoint
 import com.skylightlim.umpoint.ui.components.CourtMark
 import com.skylightlim.umpoint.ui.components.CourtTile
 import com.skylightlim.umpoint.ui.components.EmptyState
+import com.skylightlim.umpoint.ui.components.LocalBottomClearance
 import com.skylightlim.umpoint.ui.components.Note
 import com.skylightlim.umpoint.ui.components.NoteTone
 import com.skylightlim.umpoint.ui.components.RefreshBox
 import com.skylightlim.umpoint.ui.components.ScreenFrame
+import com.skylightlim.umpoint.ui.components.SegmentRow
 import com.skylightlim.umpoint.ui.components.bounceIn
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 import kotlinx.coroutines.launch
@@ -102,6 +114,15 @@ private fun hhmm(minutes: Int): String = "%02d:%02d".format(minutes / 60, minute
 internal fun Task.live(): Boolean = status == "armed" || status == "running" || status == "ringing"
 
 private data class DateChoice(val date: String, val week: WeekType, val bookable: Boolean)
+
+/** What the floating action button at the bottom of Courts says and does right now. */
+private data class SlotAction(
+    val label: String,
+    val sniping: Boolean,
+    val enabled: Boolean,
+    val busy: Boolean,
+    val onClick: () -> Unit,
+)
 
 /**
  * Date, then time, then court. There is no week switch: this week's days and next week's sit in one
@@ -144,6 +165,10 @@ fun CourtsScreen(
 
     val ringing = tasks.any { it.status == "ringing" }
     val blocker = problems(vm, session, setup, ringing).firstOrNull { it.blocksArming }
+    var action by remember { mutableStateOf<SlotAction?>(null) }
+    var shownAction by remember { mutableStateOf<SlotAction?>(null) }
+    action?.let { shownAction = it }
+    val clearance = LocalBottomClearance.current
 
     ScreenFrame("Courts", session, onOpenSettings) {
         DateStrip(
@@ -164,11 +189,11 @@ fun CourtsScreen(
                 Text(
                     when {
                         !choice.bookable -> "${dayLabel(date)} · view only"
-                        choice.week == WeekType.NEXT -> "${dayLabel(date)} · sniper fires ${shortDay(rollover)}, 00:00"
+                        choice.week == WeekType.NEXT -> "${dayLabel(date)} · fires ${shortDay(rollover).substringBefore(" ")} 00:00"
                         else -> "${dayLabel(date)} · book now"
                     },
                     style = MaterialTheme.typography.titleSmallEmphasized,
-                    maxLines = 2,
+                    maxLines = 1,
                 )
                 Text(
                     when {
@@ -191,16 +216,17 @@ fun CourtsScreen(
             }
         }
 
+        Box(Modifier.weight(1f)) {
         RefreshBox(
             refreshing = state.refreshing,
             onRefresh = { vm.refreshAll() },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxSize(),
         ) {
             Column(
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = clearance),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 val data = state.data
@@ -241,13 +267,63 @@ fun CourtsScreen(
                             rollover = rollover,
                             armBlocker = blocker,
                             onOpenSettings = onOpenSettings,
+                            onAction = { action = it },
                         )
                     }
                 }
             }
         }
+
+        FloatingAction(
+            visible = action != null,
+            action = shownAction,
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+        )
+        }
     }
 }
+
+@Composable
+private fun FloatingAction(visible: Boolean, action: SlotAction?, modifier: Modifier = Modifier) {
+    val motion = MaterialTheme.motionScheme
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(motion.defaultSpatialSpec<IntOffset>()) { it * 2 },
+        exit = slideOutVertically(motion.defaultSpatialSpec<IntOffset>()) { it * 2 },
+        modifier = modifier,
+    ) {
+        action?.let { SlotActionButton(it) }
+    }
+}
+
+@Composable
+private fun SlotActionButton(action: SlotAction) {
+    val cc = LocalCourtColors.current
+    Button(
+        onClick = action.onClick,
+        enabled = action.enabled,
+        shapes = ButtonDefaults.shapes(),
+        colors = if (action.sniping) {
+            ButtonDefaults.buttonColors(containerColor = cc.armed, contentColor = cc.onArmed)
+        } else {
+            ButtonDefaults.buttonColors()
+        },
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp),
+        modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MediumContainerHeight),
+    ) {
+        when {
+            action.busy -> LoadingIndicator(Modifier.size(32.dp))
+            else -> {
+                if (action.sniping && action.enabled) {
+                    Icon(Icons.Rounded.GpsFixed, contentDescription = null, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(action.label, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1)
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun DateStrip(
@@ -328,6 +404,7 @@ private fun DateTile(
         onCheckedChange = { onClick() },
         modifier = modifier.width(68.dp).heightIn(min = 84.dp),
         contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp),
+        colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceBright),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
@@ -371,6 +448,7 @@ private fun SlotSteps(
     rollover: Long,
     armBlocker: Problem?,
     onOpenSettings: () -> Unit,
+    onAction: (SlotAction?) -> Unit,
 ) {
     var time by rememberSaveable(date) { mutableStateOf<String?>(null) }
     var lastTime by remember { mutableStateOf<String?>(null) }
@@ -378,6 +456,7 @@ private fun SlotSteps(
     val motion = MaterialTheme.motionScheme
 
     BackHandler(enabled = time != null) { time = null }
+    if (time == null) SideEffect { onAction(null) }
 
     AnimatedContent(
         targetState = time == null,
@@ -406,6 +485,7 @@ private fun SlotSteps(
                     onChangeTime = { time = null },
                     onDone = { time = null },
                     onOpenSettings = onOpenSettings,
+                    onAction = onAction,
                 )
             }
         }
@@ -468,7 +548,11 @@ private fun TimeChip(
         onClick = onClick,
         enabled = enabled,
         shapes = ButtonDefaults.shapes(),
-        modifier = modifier.heightIn(min = 64.dp).bounceIn(order),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceBright,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        modifier = modifier.heightIn(min = 72.dp).bounceIn(order),
         contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -493,9 +577,9 @@ private fun CourtStep(
     onChangeTime: () -> Unit,
     onDone: () -> Unit,
     onOpenSettings: () -> Unit,
+    onAction: (SlotAction?) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    val cc = LocalCourtColors.current
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     var slots by rememberSaveable { mutableIntStateOf(2) }
@@ -574,6 +658,34 @@ private fun CourtStep(
         }
     }
 
+    val canAct = chosen != null && !busy && !(sniping && armBlocker != null)
+    // A stable click handler, so an unchanged button doesn't count as a change and recompose for ever.
+    val latestClick by rememberUpdatedState { chosen?.let(::act) }
+    val click = remember { { latestClick(); Unit } }
+    val current = if (!bookable) {
+        null
+    } else {
+        SlotAction(
+            label = when {
+                chosen == null -> "Choose a court"
+                sniping -> "Arm · Court $chosen"
+                else -> "Book Court $chosen"
+            },
+            sniping = sniping,
+            enabled = canAct,
+            busy = busy,
+            onClick = click,
+        )
+    }
+    SideEffect { onAction(current) }
+    DisposableEffect(vm) {
+        vm.setDockHidden(true)
+        onDispose {
+            vm.setDockHidden(false)
+            onAction(null)
+        }
+    }
+
     Column(Modifier.animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.primaryContainer) {
             Row(
@@ -609,6 +721,7 @@ private fun CourtStep(
                         else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                     },
                     contentPadding = PaddingValues(horizontal = 4.dp),
+                    colors = ToggleButtonDefaults.colors(containerColor = colors.surfaceBright),
                 ) { Text(label, maxLines = 1) }
             }
         }
@@ -638,53 +751,19 @@ private fun CourtStep(
         if (!bookable) return@Column
 
         if (sniping) {
-            Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Any court fallback", style = MaterialTheme.typography.titleSmallEmphasized)
-                        Text(
-                            "If your court is taken at midnight, try the others one at a time.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
-                        )
-                    }
-                    Switch(checked = anyCourt, onCheckedChange = { anyCourt = it })
-                }
-            }
+            SegmentRow(
+                shape = MaterialTheme.shapes.extraLarge,
+                title = "Any court fallback",
+                subtitle = "If your court is taken at midnight, try the others one at a time.",
+                icon = Icons.Rounded.SwapHoriz,
+                trailing = { Switch(checked = anyCourt, onCheckedChange = { anyCourt = it }) },
+            )
         }
 
         warning?.let { Note(it, NoteTone.WARN) }
         problem?.let { Note(it, NoteTone.ERROR) }
         if (sniping && armBlocker != null) {
-            Note(armBlocker.text, NoteTone.ERROR, actionLabel = armBlocker.action, onAction = armBlocker.fix)
-        }
-
-        val canAct = chosen != null && !busy && !(sniping && armBlocker != null)
-        Button(
-            onClick = { chosen?.let(::act) },
-            enabled = canAct,
-            shapes = ButtonDefaults.shapes(),
-            colors = if (sniping) {
-                ButtonDefaults.buttonColors(containerColor = cc.armed, contentColor = cc.onArmed)
-            } else {
-                ButtonDefaults.buttonColors()
-            },
-            modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MediumContainerHeight),
-        ) {
-            when {
-                busy -> ContainedLoadingIndicator(Modifier.size(32.dp))
-                chosen == null -> Text("Choose a court", style = MaterialTheme.typography.titleMedium)
-                sniping -> {
-                    Icon(Icons.Rounded.GpsFixed, contentDescription = null, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Arm · Court $chosen", style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1)
-                }
-                else -> Text("Book Court $chosen", style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1)
-            }
+            Note("${armBlocker.title}. ${armBlocker.text}", NoteTone.ERROR, actionLabel = armBlocker.action, onAction = armBlocker.fix)
         }
 
         TextButton(

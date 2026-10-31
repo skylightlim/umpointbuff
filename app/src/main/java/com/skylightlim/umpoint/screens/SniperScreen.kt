@@ -1,11 +1,11 @@
 package com.skylightlim.umpoint.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skylightlim.umpoint.AppViewModel
 import com.skylightlim.umpoint.data.SessionState
@@ -64,14 +65,20 @@ import com.skylightlim.umpoint.data.weekOf
 import com.skylightlim.umpoint.data.weekRange
 import com.skylightlim.umpoint.sniper.Task
 import com.skylightlim.umpoint.sniper.Umpoint
+import com.skylightlim.umpoint.ui.components.LocalBottomClearance
 import com.skylightlim.umpoint.ui.components.Note
 import com.skylightlim.umpoint.ui.components.NoteTone
+import com.skylightlim.umpoint.ui.components.ProblemCard
 import com.skylightlim.umpoint.ui.components.RefreshBox
 import com.skylightlim.umpoint.ui.components.RollingText
 import com.skylightlim.umpoint.ui.components.ScreenFrame
+import com.skylightlim.umpoint.ui.components.SectionLabel
+import com.skylightlim.umpoint.ui.components.SegmentGap
+import com.skylightlim.umpoint.ui.components.SegmentRow
 import com.skylightlim.umpoint.ui.components.ShuttleBadge
 import com.skylightlim.umpoint.ui.components.ShuttleState
 import com.skylightlim.umpoint.ui.components.bounceIn
+import com.skylightlim.umpoint.ui.components.segmentShape
 import com.skylightlim.umpoint.ui.components.springPress
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 import java.time.Instant
@@ -219,17 +226,11 @@ fun SniperScreen(
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = LocalBottomClearance.current),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 issues.forEachIndexed { index, issue ->
-                    Note(
-                        issue.text,
-                        NoteTone.ERROR,
-                        modifier = Modifier.bounceIn(index),
-                        actionLabel = issue.action,
-                        onAction = issue.fix,
-                    )
+                    ProblemCard(issue.title, issue.text, issue.fix, Modifier.bounceIn(index))
                 }
 
                 CountdownHero(
@@ -320,7 +321,7 @@ private fun CountdownHero(
                         color = colors.onPrimaryContainer,
                         modifier = Modifier.weight(1f),
                     )
-                    Surface(shape = CircleShape, color = colors.surface) {
+                    Surface(shape = CircleShape, color = colors.surfaceBright) {
                         Text(
                             "$used of 2 used",
                             style = MaterialTheme.typography.labelMedium,
@@ -330,17 +331,26 @@ private fun CountdownHero(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                // The hero number scales a little with the user's text size, but must fit on one line.
-                val density = LocalDensity.current
-                CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1.15f))) {
-                    if (days != null) {
-                        Text(
-                            if (days == 1) "1 day" else "$days days",
-                            style = MaterialTheme.typography.displaySmall,
-                            color = colors.onPrimaryContainer,
-                        )
+                // The wide digits are sized to the card so they always fit on one line, at any text size.
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val size = (maxWidth.value / 7.6f).coerceAtMost(45f)
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
+                        Column {
+                            if (days != null) {
+                                Text(
+                                    if (days == 1) "1 day" else "$days days",
+                                    style = MaterialTheme.typography.displaySmall.copy(fontSize = (size * 0.8f).sp, lineHeight = (size * 1.05f).sp),
+                                    color = colors.onPrimaryContainer,
+                                )
+                            }
+                            RollingText(
+                                parts.last(),
+                                MaterialTheme.typography.displayMedium.copy(fontSize = size.sp, lineHeight = (size * 1.2f).sp),
+                                colors.onPrimaryContainer,
+                            )
+                        }
                     }
-                    RollingText(parts.last(), MaterialTheme.typography.displayMedium, colors.onPrimaryContainer)
                 }
                 Text(
                     "${weekRange(rollover)} · opens ${shortDay(rollover)}, 00:00:00 MYT",
@@ -372,7 +382,7 @@ private fun ChamberCard(chamber: Chamber, order: Int, modifier: Modifier = Modif
         ShuttleState.ARMED -> cc.armedContainer to cc.onArmedContainer
         ShuttleState.BOOKED -> cc.mineContainer to cc.onMineContainer
         ShuttleState.LOST -> colors.errorContainer to colors.onErrorContainer
-        else -> colors.surface to colors.onSurface
+        else -> colors.surfaceBright to colors.onSurface
     }
     val description = listOfNotNull(chamber.status, chamber.day, chamber.time, chamber.detail).joinToString(", ")
     Surface(
@@ -416,21 +426,21 @@ private fun ChamberCard(chamber: Chamber, order: Int, modifier: Modifier = Modif
 @Composable
 private fun RulesSection() {
     val colors = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Booking rules", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.padding(horizontal = 4.dp))
-        Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow) {
-            Column(Modifier.padding(vertical = 8.dp)) {
-                RULES.forEach { rule ->
+    Column {
+        SectionLabel("Booking rules")
+        Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+            RULES.forEachIndexed { index, rule ->
+                Surface(shape = segmentShape(index, RULES.size), color = colors.surfaceBright) {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(rule.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                        Surface(shape = CircleShape, color = colors.surfaceContainerHighest) {
+                        Surface(shape = CircleShape, color = colors.secondaryContainer) {
                             Text(
                                 rule.source.label,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
+                                color = colors.onSecondaryContainer,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             )
                         }
@@ -442,7 +452,7 @@ private fun RulesSection() {
             "Terms: Pusat Sukan’s rules. Page: UMPoint’s booking page. Seen: observed on the site. Note: this app’s own limit.",
             style = MaterialTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp),
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
         )
     }
 }
@@ -457,18 +467,18 @@ private fun HistorySection(
     val colors = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     val turn by animateFloatAsState(if (open) 180f else 0f, motion.defaultSpatialSpec(), label = "turn")
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = colors.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth().animateContentSize(motion.defaultSpatialSpec()),
+    val count = if (open) finished.size + 1 else 1
+    Column(
+        Modifier.fillMaxWidth().animateContentSize(motion.defaultSpatialSpec()),
+        verticalArrangement = Arrangement.spacedBy(SegmentGap),
     ) {
-        Column {
+        Surface(shape = segmentShape(0, count), color = colors.surfaceBright) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 56.dp)
+                    .heightIn(min = 64.dp)
                     .clickable(role = Role.Button, onClick = onToggle)
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 18.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Snipe history · ${finished.size}", style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
@@ -478,33 +488,19 @@ private fun HistorySection(
                     modifier = Modifier.graphicsLayer { rotationZ = turn },
                 )
             }
-            AnimatedVisibility(open) {
-                Column {
-                    finished.forEach { task ->
-                        HorizontalDivider(color = colors.outlineVariant)
-                        val look = taskLook(task.status)
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 64.dp)
-                                .clickable { onOpen(task) }
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            ShuttleBadge(if (task.dryRun) ShuttleState.TEST else look.shuttle, 40.dp)
-                            Column(Modifier.weight(1f)) {
-                                Text("${dayLabel(task.date)} · ${task.start}–${task.end}", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    "${if (task.dryRun) "Dry run" else "Court ${task.bookedCourt ?: task.court}"} · ${look.label}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
-                    }
-                }
+        }
+        if (open) {
+            finished.forEachIndexed { index, task ->
+                val look = taskLook(task.status)
+                SegmentRow(
+                    shape = segmentShape(index + 1, count),
+                    title = "${dayLabel(task.date)} · ${task.start}–${task.end}",
+                    subtitle = "${if (task.dryRun) "Dry run" else "Court ${task.bookedCourt ?: task.court}"} · ${look.label}",
+                    leading = { ShuttleBadge(if (task.dryRun) ShuttleState.TEST else look.shuttle, 52.dp) },
+                    chevron = true,
+                    onClick = { onOpen(task) },
+                    modifier = Modifier.bounceIn(index),
+                )
             }
         }
     }

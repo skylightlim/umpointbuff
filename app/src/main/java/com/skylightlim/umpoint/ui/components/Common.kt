@@ -38,6 +38,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -61,6 +62,9 @@ import androidx.compose.material3.MaterialShapes
 import com.skylightlim.umpoint.data.SessionState
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 
+/** How far scrolling content must stop short of the screen's bottom edge to clear the dock. */
+val LocalBottomClearance = compositionLocalOf { 32.dp }
+
 /** A top-level screen: a flexible app bar that collapses as the content scrolls, and the avatar. */
 @Composable
 fun ScreenFrame(
@@ -76,8 +80,8 @@ fun ScreenFrame(
             actions = { AccountButton(session, onAccount) },
             scrollBehavior = scroll,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             ),
         )
         content()
@@ -122,7 +126,7 @@ fun Note(
 ) {
     val colors = MaterialTheme.colorScheme
     val (container, content, icon) = when (tone) {
-        NoteTone.INFO -> Triple(colors.surfaceContainerHigh, colors.onSurfaceVariant, Icons.Rounded.Info)
+        NoteTone.INFO -> Triple(colors.surfaceBright, colors.onSurfaceVariant, Icons.Rounded.Info)
         NoteTone.WARN -> Triple(colors.tertiaryContainer, colors.onTertiaryContainer, Icons.Rounded.Warning)
         NoteTone.ERROR -> Triple(colors.errorContainer, colors.onErrorContainer, Icons.Rounded.Error)
     }
@@ -172,6 +176,24 @@ fun EmptyState(
     }
 }
 
+/** A whole-card warning: tap anywhere on it to fix the problem. */
+@Composable
+fun ProblemCard(title: String, text: String, onFix: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    SegmentRow(
+        shape = MaterialTheme.shapes.extraLarge,
+        title = title,
+        subtitle = text,
+        modifier = modifier,
+        color = colors.errorContainer,
+        titleColor = colors.onErrorContainer,
+        subtitleColor = colors.onErrorContainer,
+        leading = { IconTile(Icons.Rounded.Error, container = colors.error, content = colors.onError) },
+        chevron = true,
+        onClick = onFix,
+    )
+}
+
 enum class CourtMark { FREE, MINE, ARMED, TAKEN, CLOSED, UNAVAILABLE }
 
 /** One court: a drawn court and a word for its state, selectable only when free. */
@@ -192,7 +214,7 @@ fun CourtTile(
         mark == CourtMark.FREE -> cc.freeContainer to cc.onFreeContainer
         mark == CourtMark.MINE -> cc.mineContainer to cc.onMineContainer
         mark == CourtMark.ARMED -> cc.armedContainer to cc.onArmedContainer
-        else -> colors.surfaceContainerHigh to colors.onSurfaceVariant
+        else -> colors.surfaceContainerHighest to colors.onSurfaceVariant
     }
     val fill by animateColorAsState(container, motion.fastEffectsSpec(), label = "fill")
     val ink by animateColorAsState(content, motion.fastEffectsSpec(), label = "ink")

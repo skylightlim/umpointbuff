@@ -3,11 +3,12 @@ package com.skylightlim.umpoint.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -23,11 +24,15 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.GridView
@@ -40,18 +45,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ShortNavigationBar
-import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -76,9 +81,17 @@ import com.skylightlim.umpoint.screens.CourtsScreen
 import com.skylightlim.umpoint.screens.ResultHero
 import com.skylightlim.umpoint.screens.SettingsScreen
 import com.skylightlim.umpoint.screens.SniperScreen
+import com.skylightlim.umpoint.ui.components.DockItem
+import com.skylightlim.umpoint.ui.components.FloatingDock
+import com.skylightlim.umpoint.ui.components.LocalBottomClearance
 import com.skylightlim.umpoint.ui.components.UmpointWebViewDialog
 import com.skylightlim.umpoint.ui.components.WebViewMode
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+/** Room for the dock (76 dp tall) and the gaps around it, above the system navigation bar. */
+private val DOCK_CLEARANCE = 112.dp
 
 private enum class Tab(val label: String) {
     COURTS("Courts"),
@@ -119,6 +132,7 @@ fun AppRoot(vm: AppViewModel) {
     val signIn by vm.signIn.collectAsStateWithLifecycle()
     val dashboard by vm.dashboard.collectAsStateWithLifecycle()
     val justArmed by vm.justArmed.collectAsStateWithLifecycle()
+    val dockHidden by vm.dockHidden.collectAsStateWithLifecycle()
     val tasks by vm.tasks.collectAsStateWithLifecycle()
     val seen by vm.seenResults.collectAsStateWithLifecycle()
     val saved = rememberSaveableStateHolder()
@@ -157,12 +171,26 @@ fun AppRoot(vm: AppViewModel) {
     }
     val openSettings = { settingsOpen = true }
 
-    BackHandler(enabled = settingsOpen) { settingsOpen = false }
+    val scope = rememberCoroutineScope()
+    val backProgress = remember { Animatable(0f) }
+    val backSpring = motion.defaultSpatialSpec<Float>()
+    LaunchedEffect(settingsOpen) { if (settingsOpen) backProgress.snapTo(0f) }
+    PredictiveBackHandler(enabled = settingsOpen) { events ->
+        try {
+            events.collect { backProgress.snapTo(it.progress) }
+            settingsOpen = false
+        } catch (e: CancellationException) {
+            scope.launch { backProgress.animateTo(0f, backSpring) }
+            throw e
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
+        val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             snackbarHost = {
                 SnackbarHost(snackbar) { data ->
@@ -182,24 +210,10 @@ fun AppRoot(vm: AppViewModel) {
                     )
                 }
             },
-            bottomBar = {
-                if (!wide) {
-                    ShortNavigationBar {
-                        Tab.entries.forEach { item ->
-                            ShortNavigationBarItem(
-                                selected = tab == item,
-                                onClick = { selectTab(item) },
-                                icon = { TabIcon(item, tab == item) },
-                                label = { Text(item.label) },
-                            )
-                        }
-                    }
-                }
-            },
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding)) {
                 if (wide) {
-                    NavigationRail {
+                    NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                         Spacer(Modifier.height(12.dp))
                         Tab.entries.forEach { item ->
                             NavigationRailItem(
@@ -231,6 +245,8 @@ fun AppRoot(vm: AppViewModel) {
                             label = "tab",
                         ) { current ->
                             saved.SaveableStateProvider(current.name) {
+                                val clearance = if (wide) 32.dp else DOCK_CLEARANCE + bottomInset
+                                CompositionLocalProvider(LocalBottomClearance provides clearance) {
                                 when (current) {
                                     Tab.COURTS -> CourtsScreen(vm = vm, session = session, onOpenSettings = openSettings)
                                     Tab.SNIPER -> SniperScreen(
@@ -244,10 +260,26 @@ fun AppRoot(vm: AppViewModel) {
                                     )
                                     Tab.BOOKINGS -> BookingsScreen(vm = vm, session = session, onOpenSettings = openSettings)
                                 }
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        if (!wide) {
+            AnimatedVisibility(
+                visible = !dockHidden && !settingsOpen,
+                enter = slideInVertically(motion.defaultSpatialSpec<IntOffset>()) { it * 2 },
+                exit = slideOutVertically(motion.defaultSpatialSpec<IntOffset>()) { it * 2 },
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp),
+            ) {
+                FloatingDock(
+                    items = Tab.entries.map { item -> DockItem(item.label) { selected -> item.icon(selected) } },
+                    selected = tab.ordinal,
+                    onSelect = { selectTab(Tab.entries[it]) },
+                )
             }
         }
 
@@ -256,7 +288,20 @@ fun AppRoot(vm: AppViewModel) {
             enter = slideInVertically(motion.defaultSpatialSpec<IntOffset>()) { it } + fadeIn(motion.fastEffectsSpec()),
             exit = slideOutVertically(motion.defaultSpatialSpec<IntOffset>()) { it } + fadeOut(motion.fastEffectsSpec()),
         ) {
-            SettingsScreen(vm = vm, session = session, onBack = { settingsOpen = false })
+            SettingsScreen(
+                vm = vm,
+                session = session,
+                onBack = { settingsOpen = false },
+                // The page shrinks and rounds under the back gesture, so it tracks the finger.
+                modifier = Modifier
+                    .graphicsLayer {
+                        val scale = 1f - backProgress.value * 0.06f
+                        scaleX = scale
+                        scaleY = scale
+                        shape = RoundedCornerShape(36.dp * backProgress.value)
+                        clip = backProgress.value > 0f
+                    },
+            )
         }
 
         justArmed?.let { task ->

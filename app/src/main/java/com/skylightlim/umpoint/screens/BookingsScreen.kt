@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,10 +46,14 @@ import com.skylightlim.umpoint.data.parseBooking
 import com.skylightlim.umpoint.data.weekOf
 import com.skylightlim.umpoint.sniper.Umpoint
 import com.skylightlim.umpoint.ui.components.EmptyState
+import com.skylightlim.umpoint.ui.components.LocalBottomClearance
 import com.skylightlim.umpoint.ui.components.MorphBadge
 import com.skylightlim.umpoint.ui.components.RefreshBox
 import com.skylightlim.umpoint.ui.components.ScreenFrame
+import com.skylightlim.umpoint.ui.components.SectionLabel
+import com.skylightlim.umpoint.ui.components.SegmentGap
 import com.skylightlim.umpoint.ui.components.bounceIn
+import com.skylightlim.umpoint.ui.components.segmentShape
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 
 @Composable
@@ -80,8 +85,8 @@ fun BookingsScreen(
         ) {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = LocalBottomClearance.current),
+                verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
                 item {
                     Text(
@@ -125,16 +130,13 @@ fun BookingsScreen(
                             val inGroup = sorted.filter { groupOf(it) == group }
                             if (inGroup.isNotEmpty()) {
                                 item(key = group) {
-                                    Text(
-                                        group,
-                                        style = MaterialTheme.typography.titleLargeEmphasized,
-                                        modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 4.dp),
-                                    )
+                                    SectionLabel(group, Modifier.padding(top = 16.dp))
                                 }
                                 itemsIndexed(inGroup, key = { _, b -> b.num + b.invoice }) { index, booking ->
                                     BookingCard(
                                         booking = booking,
                                         slot = parseBooking(booking),
+                                        shape = segmentShape(index, inGroup.size),
                                         onCancel = { vm.showDashboard() },
                                         modifier = Modifier.animateItem().bounceIn(index),
                                     )
@@ -149,10 +151,10 @@ fun BookingsScreen(
 }
 
 @Composable
-private fun BookingCard(booking: Booking, slot: BookedSlot?, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+private fun BookingCard(booking: Booking, slot: BookedSlot?, shape: Shape, onCancel: () -> Unit, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val cc = LocalCourtColors.current
-    Surface(shape = MaterialTheme.shapes.large, color = colors.surfaceContainerLow, modifier = modifier.fillMaxWidth()) {
+    Surface(shape = shape, color = colors.surfaceBright, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Row(
                 Modifier.fillMaxWidth(),

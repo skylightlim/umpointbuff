@@ -2,6 +2,8 @@
 
 Material 3 Expressive in Jetpack Compose. Material decides what things are: components, navigation, Back, colour roles. Apple's fluid-interface ideas decide how they feel: instant press feedback, interruptible springs, and no input ever waiting on an animation.
 
+The look is studied from two apps the owner points to as the bar: Minus (open source, `isaacsa51/Minus`) and Material Capsule. See "What we took from them" in `docs/KNOWLEDGE.md`.
+
 Sources: [Start building with M3 Expressive](https://m3.material.io/blog/building-with-m3-expressive), [motion in Compose](https://m3.material.io/blog/m3-expressive-motion-theming), [choosing a colour scheme](https://m3.material.io/styles/color/choosing-a-scheme), [toolbars](https://m3.material.io/components/toolbars/guidelines).
 
 ## Colour
@@ -18,9 +20,15 @@ What a court or snipe means never follows the wallpaper. `LocalCourtColors` hold
 
 Every state also has a word or icon, so colour never carries the meaning alone.
 
+## Surfaces
+
+The screen sits on tinted `surfaceContainer`, with lighter `surfaceBright` cards on top. Rows of a group touch with a 3 dp gap: 28 dp corners outside a group and 6 dp where rows meet (`segmentShape`). Each group has a small `primary` label above it. A row's icon sits in a squircle (`IconTile`), and a trailing control sits behind a thin divider.
+
+Warnings are whole-card targets in `errorContainer` with a filled squircle (`ProblemCard`).
+
 ## Type
 
-Roboto with the Emphasized styles for everything routine. Archivo Expanded appears only in the `display*` styles: hero numbers and hero titles. Numbers that change use tabular figures.
+One rounded face: Google Sans Flex (`ROND` 100, Open Font License, licence in `assets/`). `SansFlex` is for routine text. `WideFlex` (`wdth` 151) is for screen titles, step titles and hero numbers, so all the display styles and `headlineMedium` use it. Numbers use tabular figures.
 
 ## Motion
 
@@ -50,6 +58,8 @@ A shuttle's shape shows its state: circle and dashed when empty, cookie when arm
 
 ## Components
 
-`ShortNavigationBar`, `NavigationRail` from 600 dp, `MediumFlexibleTopAppBar`, `ToggleButton`, connected button groups for duration, `shapes = ButtonDefaults.shapes()` on buttons, `LoadingIndicator`, and the expressive pull-to-refresh indicator.
+`FloatingDock` (a floating pill of tabs, whose selected blob has two edges on separate springs) with `NavigationRail` from 600 dp, `MediumFlexibleTopAppBar`, `ToggleButton`, connected button groups for duration, `shapes = ButtonDefaults.shapes()` on buttons, `LoadingIndicator`, and the expressive pull-to-refresh indicator.
 
-Don't show a floating toolbar with the navigation bar, and keep routine lists calm. Touch targets are at least 48 dp.
+In the court step the dock slides away and the big Book or Arm button floats in its place, so the main action is always in reach. Settings shrinks and rounds under the predictive back gesture.
+
+The dock is a deliberate departure: Material reserves floating toolbars for secondary pages and uses a navigation bar for top-level tabs. The owner chose it after studying Capsule. Keep routine lists calm. Touch targets are at least 48 dp.

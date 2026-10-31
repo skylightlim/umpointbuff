@@ -46,8 +46,30 @@ Library status at `material3:1.5.0-beta02` (21 Oct 2026):
 
 API details learned while compiling:
 - There is no `ButtonDefaults.textShapes()`. Use `ButtonDefaults.shapes()`.
+- `ToggleButton` colours come from `ToggleButtonDefaults.colors(...)`.
+- `AnimatedVisibility` inside a `Box` inside a `Column` hits a scope error. Put it in its own composable.
 - `androidx.graphics.shapes.Morph.toPath(progress)` gives a path in a unit square, so scale it to the size.
 - To check a signature, run `javap` on `classes.jar` from `material3.aar` in `~/.gradle/caches/modules-2/files-2.1/androidx.compose.material3/material3-android/<version>/`.
+
+## What we took from Minus and Material Capsule
+
+The owner holds these two apps up as the bar for Material 3. Studied on the 9 Pro on 31 Oct 2026. Minus is open source under Apache-2.0 (`isaacsa51/Minus`, package `com.serranoie.app.minus`); Material Capsule (`com.pryshedko.mtisland`) is closed.
+
+Adopted:
+- Google Sans Flex with `ROND` 100 everywhere, stretched with `wdth` for titles (both apps). This did the most to make the app feel like them.
+- Tinted background with lighter grouped cards (Capsule).
+- Groups with big outer and small inner corners, primary-coloured section labels, squircle icon tiles, and a divider before trailing controls (both).
+- Floating pill dock with a sliding blob (Capsule).
+- Whole-card warning with a filled squircle and chevron (Capsule).
+- A full-width floating main action (Minus's "New budget period").
+- Page shrinks to 94% with 36 dp corners under predictive back (Minus's `BackMotion.kt`).
+
+Not adopted yet, could be offered:
+- A theme picker with System, Light, Dark and contrast levels, with a live preview (Minus).
+- A "Bounce intensity" setting and "Reduce animations" toggle (Capsule).
+- A keypad-style home (Minus). It suits typing amounts, not picking slots.
+
+Minus also bundles a `TopSheet`, swipe actions and tutorial hints worth reading if those come up. It uses tweens for page transitions, so don't copy that: this app's rule is springs.
 
 ## Testing on a phone
 
@@ -57,12 +79,11 @@ API details learned while compiling:
 
 | Control | x, y |
 |---|---|
-| Tabs: Courts, Sniper, Bookings | 180, 540, 900 at y 2230 |
-| Avatar | 1005, 217 |
-| 12:00 time chip | 666, 1172 |
-| Court 3, after picking a time | 667, 1490 |
-| Arm button, after picking a court | 540, 1995 |
-| Passed button | 900, 730 |
+| Tabs: Courts, Sniper, Bookings | 275, 540, 800 at y 2200 |
+| Avatar | 1007, 217 |
+| 12:00 time chip | 667, 1220 |
+| Court 3, after picking a time | 668, 1517 |
+| Arm button, after picking a court | 580, 2231 |
 
 - The app's private files can be read with `run-as` only on debug builds.
 - The sign-in step showed a spinner for at least 6 seconds before its error during the outage, so wait about 25 seconds before capturing it.

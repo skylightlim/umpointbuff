@@ -66,6 +66,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _seenResults = MutableStateFlow(repo.seenResults())
     val seenResults: StateFlow<Set<String>> = _seenResults.asStateFlow()
 
+    /** The booking flow's big button takes the dock's place at the bottom of the screen. */
+    private val _dockHidden = MutableStateFlow(false)
+    val dockHidden: StateFlow<Boolean> = _dockHidden.asStateFlow()
+
+    fun setDockHidden(hidden: Boolean) {
+        _dockHidden.value = hidden
+    }
+
     private var demo = false
 
     private val _thisWeek = MutableStateFlow(WeekUiState())
