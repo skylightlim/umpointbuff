@@ -331,16 +331,16 @@ private fun CountdownHero(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                // The wide digits are sized to the card so they always fit on one line, at any text size.
+                // The digits are sized to the card so they always fit on one line, at any text size.
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val size = (maxWidth.value / 7.6f).coerceAtMost(45f)
+                    val size = (maxWidth.value / 5.4f).coerceAtMost(60f)
                     val density = LocalDensity.current
                     CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
                         Column {
                             if (days != null) {
                                 Text(
                                     if (days == 1) "1 day" else "$days days",
-                                    style = MaterialTheme.typography.displaySmall.copy(fontSize = (size * 0.8f).sp, lineHeight = (size * 1.05f).sp),
+                                    style = MaterialTheme.typography.displaySmall.copy(fontSize = (size * 0.55f).sp, lineHeight = (size * 0.8f).sp),
                                     color = colors.onPrimaryContainer,
                                 )
                             }

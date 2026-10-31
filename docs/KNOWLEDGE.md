@@ -56,7 +56,7 @@ API details learned while compiling:
 The owner holds these two apps up as the bar for Material 3. Studied on the 9 Pro on 31 Oct 2026. Minus is open source under Apache-2.0 (`isaacsa51/Minus`, package `com.serranoie.app.minus`); Material Capsule (`com.pryshedko.mtisland`) is closed.
 
 Adopted:
-- Google Sans Flex with `ROND` 100 everywhere, stretched with `wdth` for titles (both apps). This did the most to make the app feel like them.
+- Google Sans Flex, the way Capsule uses it (static 24 pt files, normal width, not rounded). The owner tried Minus's rounded, stretched version first and rejected it. Capsule's default "Font 1" is matched by eye against the app's real rendering, not confirmed from its code. Capsule also bundles Inter, Rubik, Nunito, Open Sans, DM Sans, Geist and Golos.
 - Tinted background with lighter grouped cards (Capsule).
 - Groups with big outer and small inner corners, primary-coloured section labels, squircle icon tiles, and a divider before trailing controls (both).
 - Floating pill dock with a sliding blob (Capsule).
@@ -97,6 +97,8 @@ Minus also bundles a `TopSheet`, swipe actions and tutorial hints worth reading 
 - Arming needs a sign-in, so a UMPoint outage before the rollover also blocks arming.
 
 ## Decisions, so they aren't reopened
+
+Whole pages barely bounce (the owner found it too much), while controls, the dock and hero moments stay very bouncy.
 
 From the owner, 31 Oct 2026:
 - Compose fully replaces Expo. The old app is forgotten and isn't a fallback.

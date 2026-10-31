@@ -108,6 +108,12 @@ val BouncyMotion = object : MotionScheme {
     override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 800f)
 }
 
+/**
+ * For a whole page changing. A page is too big to bounce: buttons, the dock and hero moments keep
+ * [BouncyMotion], and pages only settle with the faintest give.
+ */
+fun <T> pageSpring(): FiniteAnimationSpec<T> = spring(dampingRatio = 0.92f, stiffness = 420f)
+
 val LocalCourtColors = staticCompositionLocalOf { LightCourts }
 
 @Composable

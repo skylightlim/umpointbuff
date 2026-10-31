@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.graphics.shapes.toPath
+import com.skylightlim.umpoint.ui.theme.pageSpring
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -61,17 +63,23 @@ fun Modifier.springPress(source: InteractionSource, pressed: Float = 0.92f): Mod
     }
 }
 
-/** Pops in from a little smaller, with the order of the item setting a short stagger. */
+/**
+ * Eases in from a little smaller the first time it appears. It's saved with the screen, so going
+ * back to a tab doesn't replay it across the whole page.
+ */
 @Composable
 fun Modifier.bounceIn(order: Int = 0): Modifier {
-    val spec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    val spec = pageSpring<Float>()
     val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-    val scale = remember { Animatable(0.86f) }
-    val alpha = remember { Animatable(0f) }
+    var shown by rememberSaveable { mutableStateOf(false) }
+    val scale = remember { Animatable(if (shown) 1f else 0.97f) }
+    val alpha = remember { Animatable(if (shown) 1f else 0f) }
     LaunchedEffect(Unit) {
-        delay(order.coerceAtMost(8) * 28L)
+        if (shown) return@LaunchedEffect
+        delay(order.coerceAtMost(8) * 16L)
         launch { alpha.animateTo(1f, fade) }
         scale.animateTo(1f, spec)
+        shown = true
     }
     return graphicsLayer {
         scaleX = scale.value

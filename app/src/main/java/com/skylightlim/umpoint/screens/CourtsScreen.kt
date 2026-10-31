@@ -98,6 +98,7 @@ import com.skylightlim.umpoint.ui.components.ScreenFrame
 import com.skylightlim.umpoint.ui.components.SegmentRow
 import com.skylightlim.umpoint.ui.components.bounceIn
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
+import com.skylightlim.umpoint.ui.theme.pageSpring
 import kotlinx.coroutines.launch
 
 private const val DAY_MS = 86_400_000L
@@ -461,9 +462,9 @@ private fun SlotSteps(
     AnimatedContent(
         targetState = time == null,
         transitionSpec = {
-            (fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.defaultSpatialSpec(), initialScale = 0.9f))
-                .togetherWith(fadeOut(motion.fastEffectsSpec()) + scaleOut(motion.defaultSpatialSpec(), targetScale = 0.9f))
-                .using(SizeTransform(clip = false) { _, _ -> motion.defaultSpatialSpec() })
+            (fadeIn(motion.fastEffectsSpec()) + scaleIn(pageSpring(), initialScale = 0.97f))
+                .togetherWith(fadeOut(motion.fastEffectsSpec()) + scaleOut(pageSpring(), targetScale = 0.97f))
+                .using(SizeTransform(clip = false) { _, _ -> pageSpring() })
         },
         label = "step",
     ) { choosingTime ->

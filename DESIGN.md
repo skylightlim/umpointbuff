@@ -28,11 +28,13 @@ Warnings are whole-card targets in `errorContainer` with a filled squircle (`Pro
 
 ## Type
 
-One rounded face: Google Sans Flex (`ROND` 100, Open Font License, licence in `assets/`). `SansFlex` is for routine text. `WideFlex` (`wdth` 151) is for screen titles, step titles and hero numbers, so all the display styles and `headlineMedium` use it. Numbers use tabular figures.
+Google Sans Flex (Open Font License, licence in `assets/`), set up the way Material Capsule uses it: 24 pt optical size, normal width, not rounded. The owner chose this over Minus's rounded, stretched version. Weight and size carry the hierarchy, and numbers use tabular figures.
 
 ## Motion
 
-The owner asked for as much spring as possible, so `BouncyMotion` in `Theme.kt` is much springier than Material's expressive scheme. Use `MaterialTheme.motionScheme` for all motion and never a tween.
+The owner asked for as much spring as possible, so `BouncyMotion` in `Theme.kt` is much springier than Material's expressive scheme. Use `MaterialTheme.motionScheme` for controls and never a tween.
+
+Whole pages are the exception: the owner found them too bouncy, so tab changes, Settings and the step from time to court use the nearly bounce-free `pageSpring()`. Entrances (`bounceIn`) are gentle and play once per screen.
 
 - Anything that moves, resizes or changes shape overshoots: `*SpatialSpec`.
 - Colour and opacity don't: `*EffectsSpec`.

@@ -346,7 +346,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun friendly(e: Throwable): String = when (e) {
         is SignInRequired -> e.message ?: "Sign in to continue."
-        is IOException -> "Could not reach UMPoint. Check your connection."
+        is IOException -> "UMPoint isn’t answering. It may be down, or check your connection."
         else -> e.message ?: "Could not reach UMPoint."
     }
 }

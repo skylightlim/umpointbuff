@@ -12,8 +12,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -87,6 +85,7 @@ import com.skylightlim.umpoint.ui.components.LocalBottomClearance
 import com.skylightlim.umpoint.ui.components.UmpointWebViewDialog
 import com.skylightlim.umpoint.ui.components.WebViewMode
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
+import com.skylightlim.umpoint.ui.theme.pageSpring
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -231,16 +230,10 @@ fun AppRoot(vm: AppViewModel) {
                             targetState = tab,
                             transitionSpec = {
                                 val forward = targetState.ordinal > initialState.ordinal
-                                val spatial = motion.defaultSpatialSpec<IntOffset>()
-                                val scale = motion.defaultSpatialSpec<Float>()
-                                val fade = motion.defaultEffectsSpec<Float>()
-                                (
-                                    slideInHorizontally(spatial) { if (forward) it / 3 else -it / 3 } +
-                                        scaleIn(scale, initialScale = 0.92f) + fadeIn(fade)
-                                    ).togetherWith(
-                                    slideOutHorizontally(spatial) { if (forward) -it / 3 else it / 3 } +
-                                        scaleOut(scale, targetScale = 0.92f) + fadeOut(fade),
-                                )
+                                val spatial = pageSpring<IntOffset>()
+                                val fade = motion.fastEffectsSpec<Float>()
+                                (slideInHorizontally(spatial) { if (forward) it / 8 else -it / 8 } + fadeIn(fade))
+                                    .togetherWith(slideOutHorizontally(spatial) { if (forward) -it / 8 else it / 8 } + fadeOut(fade))
                             },
                             label = "tab",
                         ) { current ->
@@ -285,8 +278,8 @@ fun AppRoot(vm: AppViewModel) {
 
         AnimatedVisibility(
             visible = settingsOpen,
-            enter = slideInVertically(motion.defaultSpatialSpec<IntOffset>()) { it } + fadeIn(motion.fastEffectsSpec()),
-            exit = slideOutVertically(motion.defaultSpatialSpec<IntOffset>()) { it } + fadeOut(motion.fastEffectsSpec()),
+            enter = slideInVertically(pageSpring<IntOffset>()) { it / 6 } + fadeIn(motion.fastEffectsSpec()),
+            exit = slideOutVertically(pageSpring<IntOffset>()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
         ) {
             SettingsScreen(
                 vm = vm,

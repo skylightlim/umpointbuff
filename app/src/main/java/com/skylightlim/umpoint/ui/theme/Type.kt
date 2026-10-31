@@ -1,6 +1,5 @@
 package com.skylightlim.umpoint.ui.theme
 
-import android.os.Build
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -10,38 +9,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.skylightlim.umpoint.R
 
-private const val WIDE = 151f
 private val WEIGHTS = listOf(400, 500, 600, 700, 800)
 
-/** One rounded instance of Google Sans Flex. Wide widths render wrongly before Android 12. */
-private fun flex(weight: Int, width: Float) = Font(
+/** One weight of Google Sans Flex, set up the way Material Capsule uses it: 24 pt, normal width, not rounded. */
+private fun flex(weight: Int) = Font(
     resId = R.font.google_sans_flex,
     weight = FontWeight(weight),
     variationSettings = FontVariation.Settings(
         FontVariation.weight(weight),
-        FontVariation.width(if (Build.VERSION.SDK_INT >= 31) width else 100f),
-        FontVariation.Setting("ROND", 100f),
+        FontVariation.Setting("opsz", 24f),
     ),
 )
 
-/** Rounded Google Sans Flex for everything routine. */
-val SansFlex = FontFamily(WEIGHTS.map { flex(it, 100f) })
-
-/** The same face stretched wide, for hero numbers, screen titles and step titles. */
-val WideFlex = FontFamily(WEIGHTS.map { flex(it, WIDE) })
+val SansFlex = FontFamily(WEIGHTS.map(::flex))
 
 private fun TextStyle.sans() = copy(fontFamily = SansFlex, fontFeatureSettings = "tnum")
-private fun TextStyle.wide(weight: Int = 700) =
-    copy(fontFamily = WideFlex, fontWeight = FontWeight(weight), fontFeatureSettings = "tnum")
+private fun TextStyle.heavy(weight: Int = 700) = sans().copy(fontWeight = FontWeight(weight))
 
 private val base = Typography()
 
 val UmpointTypography = base.copy(
-    displayLarge = base.displayLarge.wide(),
-    displayMedium = base.displayMedium.wide(),
-    displaySmall = base.displaySmall.wide(),
-    headlineLarge = base.headlineLarge.wide(),
-    headlineMedium = base.headlineMedium.copy(fontSize = 26.sp, lineHeight = 34.sp).wide(600),
+    displayLarge = base.displayLarge.heavy(),
+    displayMedium = base.displayMedium.heavy(),
+    displaySmall = base.displaySmall.heavy(),
+    headlineLarge = base.headlineLarge.heavy(),
+    headlineMedium = base.headlineMedium.copy(fontSize = 26.sp, lineHeight = 34.sp).heavy(600),
     headlineSmall = base.headlineSmall.sans(),
     titleLarge = base.titleLarge.sans(),
     titleMedium = base.titleMedium.sans(),
@@ -52,13 +44,13 @@ val UmpointTypography = base.copy(
     labelLarge = base.labelLarge.sans(),
     labelMedium = base.labelMedium.sans(),
     labelSmall = base.labelSmall.sans(),
-    displayLargeEmphasized = base.displayLargeEmphasized.wide(800),
-    displayMediumEmphasized = base.displayMediumEmphasized.wide(800),
-    displaySmallEmphasized = base.displaySmallEmphasized.wide(800),
-    headlineLargeEmphasized = base.headlineLargeEmphasized.wide(800),
+    displayLargeEmphasized = base.displayLargeEmphasized.heavy(800),
+    displayMediumEmphasized = base.displayMediumEmphasized.heavy(800),
+    displaySmallEmphasized = base.displaySmallEmphasized.heavy(800),
+    headlineLargeEmphasized = base.headlineLargeEmphasized.heavy(800),
     headlineMediumEmphasized = base.headlineMediumEmphasized.sans(),
     headlineSmallEmphasized = base.headlineSmallEmphasized.sans(),
-    titleLargeEmphasized = base.titleLargeEmphasized.copy(fontSize = 20.sp, lineHeight = 28.sp).wide(600),
+    titleLargeEmphasized = base.titleLargeEmphasized.copy(fontSize = 20.sp, lineHeight = 28.sp).heavy(600),
     titleMediumEmphasized = base.titleMediumEmphasized.sans(),
     titleSmallEmphasized = base.titleSmallEmphasized.sans(),
     bodyLargeEmphasized = base.bodyLargeEmphasized.sans(),
