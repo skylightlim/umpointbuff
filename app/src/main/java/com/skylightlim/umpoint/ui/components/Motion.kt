@@ -1,0 +1,145 @@
+package com.skylightlim.umpoint.ui.components
+
+import android.graphics.Matrix
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.graphics.shapes.Morph
+import androidx.graphics.shapes.RoundedPolygon
+import androidx.graphics.shapes.toPath
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/** Sinks on touch-down and springs back past its size on release. */
+@Composable
+fun Modifier.springPress(source: InteractionSource, pressed: Float = 0.92f): Modifier {
+    val isPressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) pressed else 1f,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "press",
+    )
+    return graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+/** Pops in from a little smaller, with the order of the item setting a short stagger. */
+@Composable
+fun Modifier.bounceIn(order: Int = 0): Modifier {
+    val spec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val scale = remember { Animatable(0.86f) }
+    val alpha = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        delay(order.coerceAtMost(8) * 28L)
+        launch { alpha.animateTo(1f, fade) }
+        scale.animateTo(1f, spec)
+    }
+    return graphicsLayer {
+        scaleX = scale.value
+        scaleY = scale.value
+        this.alpha = alpha.value
+    }
+}
+
+/** A shape partway through a morph between two Material polygons. */
+private class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val path = morph.toPath(progress)
+        path.transform(Matrix().apply { setScale(size.width, size.height) })
+        return Outline.Generic(path.asComposePath())
+    }
+}
+
+/** A filled Material shape that springs from one polygon to the next when [polygon] changes. */
+@Composable
+fun MorphBadge(
+    polygon: RoundedPolygon,
+    color: Color,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit = {},
+) {
+    val spec = MaterialTheme.motionScheme.slowSpatialSpec<Float>()
+    var from by remember { mutableStateOf(polygon) }
+    var to by remember { mutableStateOf(polygon) }
+    val progress = remember { Animatable(1f) }
+    LaunchedEffect(polygon) {
+        if (polygon !== to) {
+            from = to
+            to = polygon
+            progress.snapTo(0f)
+            progress.animateTo(1f, spec)
+        }
+    }
+    val morph = remember(from, to) { Morph(from, to) }
+    Box(
+        modifier
+            .size(size)
+            .clip(MorphShape(morph, progress.value))
+            .background(color),
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
+}
+
+/** Text whose changing characters roll into place on a spring, for live numbers. */
+@Composable
+fun RollingText(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
+    val motion = MaterialTheme.motionScheme
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        text.forEachIndexed { index, char ->
+            androidx.compose.runtime.key(text.length - index) {
+                AnimatedContent(
+                    targetState = char,
+                    transitionSpec = {
+                        (slideInVertically(motion.fastSpatialSpec<IntOffset>()) { it } + fadeIn(motion.fastEffectsSpec()))
+                            .togetherWith(slideOutVertically(motion.fastSpatialSpec<IntOffset>()) { -it } + fadeOut(motion.fastEffectsSpec()))
+                            .using(SizeTransform(clip = true) { _, _ -> motion.fastSpatialSpec<IntSize>() })
+                    },
+                    label = "digit",
+                ) { current ->
+                    Text(current.toString(), style = style, color = color, softWrap = false, maxLines = 1)
+                }
+            }
+        }
+    }
+}

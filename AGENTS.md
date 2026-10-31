@@ -1,39 +1,41 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
-
-## Expo has changed — do not trust your training data
-
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
-
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+Native Android app in Kotlin and Jetpack Compose, using Material 3 Expressive. It replaced an Expo/React Native app, which lives on the `rn-archive` branch.
 
 ## Commands
 
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
+The JDK comes from `org.gradle.java.home` in `gradle.properties`, and the SDK from `local.properties`.
 
 ```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+./gradlew :app:assembleDebug        # debug build, package com.skylightlim.umpoint.debug
+./gradlew :app:assembleRelease      # signed, minified release, package com.skylightlim.umpoint
+./gradlew :app:testDebugUnitTest    # sniper parser and booking-form tests
 ```
 
-Run lint and typecheck before declaring any task done.
+Run the tests before declaring a task done. Release signing reads `UMPOINT_*` from `~/.gradle/gradle.properties`; the key never enters the repo.
 
-## Navigation
+## Checking the UI
 
-- The app has four tabs (Courts, Sniper, Bookings, Settings), switched with `useState` in `App.tsx`. There is no router: four screens with no deep links don't need one. Keep it this way unless deep links become a requirement.
+Debug builds have a demo mode with made-up courts and no network. It shows over the lock screen:
 
-## Building with EAS
+```bash
+adb -s <serial> shell am start -n com.skylightlim.umpoint.debug/com.skylightlim.umpoint.MainActivity --es umpoint_demo none
+```
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+Scenes: `none`, `armed`, `booked`, `failed`, `problem`.
+
+To rehearse the midnight routine on a signed-in phone, add `--ez umpoint_dry_run true` to the same command with the app's own package. It runs in three minutes and books nothing. There is deliberately no button for this in the app.
+
+Never read the screen (`uiautomator dump`, screenshots) while a sign-in page may be open, and stop touching a phone as soon as someone is using it.
+
+## Structure
+
+- `sniper/`: the unattended midnight booking. Its alarm, service and booker run with no UI, so keep it free of Compose. R8 keeps this package as written.
+- `data/`: repository, cache and parsing.
+- `screens/` and `ui/`: Compose. See `DESIGN.md`.
+
+Three tabs (Courts, Sniper, Bookings) switch by state in `ui/AppRoot.kt`, with Settings behind the avatar. There is no navigation library: nothing deep-links.
 
 ## Rules
 
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+- Sniper changes need extra care: it fires once a week with nobody watching. One booking per action, courts tried one at a time, nothing cancelled on the user's behalf.
+- Never log or show other students' data. UMPoint exposes bookers' emails and matric numbers in taken cells.
+- Pin exact Material versions. Expressive APIs are in 1.5 beta, and `MaterialShapes` and `LoadingIndicator` are still experimental.
