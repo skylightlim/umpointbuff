@@ -18,6 +18,9 @@ fun problems(vm: AppViewModel, session: SessionState, setup: PhoneSetup, ringing
     } else if (session == SessionState.SIGNED_OUT) {
         add(Problem("You’re not signed in to UMPoint.", true, "Sign in") { vm.requestSignIn() })
     }
+    if (session == SessionState.OFFLINE) {
+        add(Problem("Can’t reach UMPoint right now. A snipe needs it from 23:50.", false, "Retry") { vm.retrySession() })
+    }
     if (!setup.exactAlarms) {
         add(Problem("Alarms are off, so the phone can’t wake for the snipe.", true, "Fix") { vm.openSettings("exactAlarms") })
     }

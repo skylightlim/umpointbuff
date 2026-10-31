@@ -22,8 +22,8 @@ fun browserUserAgent(ctx: Context): String =
   WebSettings.getDefaultUserAgent(ctx).replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "")
 
 /**
- * HTTP to UMPoint over the WebView's cookie store, which the sign-in sheet and React Native's
- * fetch also use — one session for the whole app.
+ * HTTP to UMPoint over the WebView's cookie store, which the sign-in sheet also uses: one session
+ * for the whole app.
  */
 class UmpointHttp(private val ctx: Context) {
   val ua = browserUserAgent(ctx)

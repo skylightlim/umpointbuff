@@ -130,12 +130,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             fullScreen = true,
             backgroundRestricted = false,
         )
+        if (scene == "signin") requestSignIn()
     }
 
     /** Runs the midnight routine in three minutes without booking; not in the UI, launched over adb. */
     fun startHiddenTestRun() {
         repo.testRun()
         reloadTasks()
+    }
+
+    fun retrySession() {
+        viewModelScope.launch {
+            repo.refreshSession()
+            refreshAll()
+        }
     }
 
     fun pickDate(date: String?) {
