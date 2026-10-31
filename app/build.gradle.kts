@@ -14,6 +14,14 @@ android {
         targetSdk = 37
         versionCode = 2
         versionName = "2.0.0"
+
+        // The Play together server and Firebase's client keys. A blank build keeps every other feature.
+        fun property(name: String) = providers.gradleProperty(name).orElse("").get()
+        buildConfigField("String", "TOGETHER_URL", "\"${property("UMPOINT_TOGETHER_URL")}\"")
+        buildConfigField("String", "FIREBASE_APP_ID", "\"${property("UMPOINT_FIREBASE_APP_ID")}\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"${property("UMPOINT_FIREBASE_API_KEY")}\"")
+        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"${property("UMPOINT_FIREBASE_PROJECT_ID")}\"")
+        buildConfigField("String", "FIREBASE_SENDER_ID", "\"${property("UMPOINT_FIREBASE_SENDER_ID")}\"")
     }
 
     signingConfigs {
@@ -40,7 +48,8 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            // A second checkout can install beside the first without overwriting it.
+            applicationIdSuffix = providers.gradleProperty("UMPOINT_DEBUG_SUFFIX").orElse(".debug").get()
         }
         release {
             // R8 is what makes Compose animation smooth in a release build.
@@ -75,6 +84,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
+    implementation("com.google.firebase:firebase-messaging:26.0.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

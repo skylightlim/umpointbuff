@@ -96,6 +96,16 @@ Minus also bundles a `TopSheet`, swipe actions and tutorial hints worth reading 
 - The dry run (`--ez umpoint_dry_run true`) never sends a booking, so it can't prove the booking step. Nothing is bookable from Saturday until the rollover.
 - Arming needs a sign-in, so a UMPoint outage before the rollover also blocks arming.
 
+## Play together
+
+- The owner says UMPoint takes only 30 minutes per booking, which is why the relay exists. The only real booking traced so far (Oct 2026) was 30 minutes, and the app's 1-hour solo snipe has never been tried. Recheck this against the first real results.
+- A relay can't fall back between courts: phones can't confer at 00:00, so `anyCourt` is off and a lost half hour leaves a gap.
+- Arming is one path: `planSync` turns server state into steps, so a push, a poll and a tap all behave alike. Solo snipes never match its id format, so it can't touch them.
+- Debug builds take `-PUMPOINT_TOGETHER_URL=http://127.0.0.1:8787` (with `adb reverse tcp:8787 tcp:8787` and `npm run dev`) and `--es umpoint_together_dev <email>` to sign in without Google. Add `--es umpoint_demo none` to get past the UMPoint sign-in on a phone with no session.
+- `-PUMPOINT_DEBUG_SUFFIX=.together` installs beside another checkout's debug build. An armed test task really rings at 23:50, so uninstall the test package afterwards.
+- Free Workers get 10 ms of CPU. RSA signing took about 10 ms cold and 2 ms warm in Node, so the FCM token is cached in D1. Not yet measured on Cloudflare itself.
+- Unknown until someone signs in: whether UM's Google Workspace admins allow a third-party OAuth app. `setup.sh` ends by testing it.
+
 ## Decisions, so they aren't reopened
 
 Whole pages barely bounce (the owner found it too much), while controls, the dock and hero moments stay very bouncy.
@@ -109,4 +119,4 @@ From the owner, 31 Oct 2026:
 - No readiness section, only errors when something is wrong.
 - No test-run button.
 - The first GitHub release comes only after the Monday 2 Nov snipe.
-- No server mode, ever.
+- No server mode, ever: no server holds a session or books. Play together's coordination server (owner's request, 1 Nov 2026) is consistent with this.

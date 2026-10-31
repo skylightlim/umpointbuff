@@ -19,6 +19,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import com.skylightlim.umpoint.R
+import com.skylightlim.umpoint.together.TogetherWorker
 
 /** Sets the 23:50 alarm for the next armed task; called whenever tasks or the clock change. */
 object SniperScheduler {
@@ -168,6 +169,8 @@ class SniperService : Service() {
       running = false
       wakeLock?.let { if (it.isHeld) it.release() }
       SniperScheduler.reschedule(this)
+      // Tells the friends in a Play together session how this phone's half hour went.
+      runCatching { TogetherWorker.now(this) }
       stopForeground(STOP_FOREGROUND_REMOVE)
       stopSelf()
     }

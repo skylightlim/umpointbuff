@@ -22,6 +22,8 @@ Success: the user arms a snipe in under a minute, goes to sleep trusting it, and
 
 The sniper runs on the user's own phone (a Kotlin alarm and foreground service), not on a server. No one else's account, no shared bot, no server mode ever.
 
+Play together has a small server, but it only coordinates: who is friends with whom, and who took which half hour. Every booking still goes from the holder's own phone under their own account.
+
 ## Operating Context
 
 - Sunday night: pick a slot in next week, arm, leave the phone on the charger. At 23:50 the phone wakes, renews the UMPoint session, and checks UMPoint's clock; at 00:00:00 it books. If the session can't be renewed it rings loudly so the user can sign in.
@@ -37,6 +39,7 @@ The sniper runs on the user's own phone (a Kotlin alarm and foreground service),
 - Every booking carries an event name and a player count (user defaults).
 - Phone readiness matters: notifications, exact alarms, full-screen alarm, battery not restricted.
 - Phone problems only appear when something is wrong; there is no readiness checklist. Developers rehearse the midnight routine over adb, and there is no test-run button.
+- Play together: a host opens a session of 2 to 6 half hours on one court and invites friends. The host holds the first half hour, and friends take the next free one in the order they accept. Each half hour costs its holder one of their two weekly bookings. Tenders close at 23:45, before the phones' 23:50 alarm. Next-week snipes only for now.
 - Native Android in Kotlin and Jetpack Compose. No navigation library: screens switch by state. An iOS version would be a separate app with a different sniper.
 
 ## Brand Commitments

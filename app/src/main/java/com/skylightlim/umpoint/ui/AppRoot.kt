@@ -79,9 +79,15 @@ import com.skylightlim.umpoint.screens.CourtsScreen
 import com.skylightlim.umpoint.screens.ResultHero
 import com.skylightlim.umpoint.screens.SettingsScreen
 import com.skylightlim.umpoint.screens.SniperScreen
+import com.skylightlim.umpoint.screens.TogetherScreen
+import com.skylightlim.umpoint.together.TogetherViewModel
+import com.skylightlim.umpoint.together.waitingCount
 import com.skylightlim.umpoint.ui.components.DockItem
 import com.skylightlim.umpoint.ui.components.FloatingDock
 import com.skylightlim.umpoint.ui.components.LocalBottomClearance
+import com.skylightlim.umpoint.ui.components.LocalTogetherEntry
+import com.skylightlim.umpoint.ui.components.TogetherEntry
+import com.skylightlim.umpoint.ui.components.TogetherSignInDialog
 import com.skylightlim.umpoint.ui.components.UmpointWebViewDialog
 import com.skylightlim.umpoint.ui.components.WebViewMode
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
@@ -123,7 +129,7 @@ private fun TabIcon(tab: Tab, selected: Boolean) {
 }
 
 @Composable
-fun AppRoot(vm: AppViewModel) {
+fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
     var tabName by rememberSaveable { mutableStateOf(Tab.COURTS.name) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val tab = Tab.valueOf(tabName)
@@ -134,6 +140,10 @@ fun AppRoot(vm: AppViewModel) {
     val dockHidden by vm.dockHidden.collectAsStateWithLifecycle()
     val tasks by vm.tasks.collectAsStateWithLifecycle()
     val seen by vm.seenResults.collectAsStateWithLifecycle()
+    val togetherOpen by together.open.collectAsStateWithLifecycle()
+    val togetherState by together.state.collectAsStateWithLifecycle()
+    val togetherSigningIn by together.signingIn.collectAsStateWithLifecycle()
+    val now by vm.now.collectAsStateWithLifecycle()
     val saved = rememberSaveableStateHolder()
     val motion = MaterialTheme.motionScheme
 
@@ -159,7 +169,10 @@ fun AppRoot(vm: AppViewModel) {
         }
     }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        vm.onResume()
+        together.refresh()
+    }
 
     val haptics = LocalHapticFeedback.current
     val selectTab: (Tab) -> Unit = { next ->
@@ -173,11 +186,11 @@ fun AppRoot(vm: AppViewModel) {
     val scope = rememberCoroutineScope()
     val backProgress = remember { Animatable(0f) }
     val backSpring = motion.defaultSpatialSpec<Float>()
-    LaunchedEffect(settingsOpen) { if (settingsOpen) backProgress.snapTo(0f) }
-    PredictiveBackHandler(enabled = settingsOpen) { events ->
+    LaunchedEffect(settingsOpen, togetherOpen) { backProgress.snapTo(0f) }
+    PredictiveBackHandler(enabled = settingsOpen || togetherOpen) { events ->
         try {
             events.collect { backProgress.snapTo(it.progress) }
-            settingsOpen = false
+            if (togetherOpen) together.setOpen(false) else settingsOpen = false
         } catch (e: CancellationException) {
             scope.launch { backProgress.animateTo(0f, backSpring) }
             throw e
@@ -239,7 +252,13 @@ fun AppRoot(vm: AppViewModel) {
                         ) { current ->
                             saved.SaveableStateProvider(current.name) {
                                 val clearance = if (wide) 32.dp else DOCK_CLEARANCE + bottomInset
-                                CompositionLocalProvider(LocalBottomClearance provides clearance) {
+                                CompositionLocalProvider(
+                                    LocalBottomClearance provides clearance,
+                                    LocalTogetherEntry provides TogetherEntry(
+                                        waiting = togetherState?.waitingCount(now) ?: 0,
+                                        onClick = { together.setOpen(true) },
+                                    ),
+                                ) {
                                 when (current) {
                                     Tab.COURTS -> CourtsScreen(vm = vm, session = session, onOpenSettings = openSettings)
                                     Tab.SNIPER -> SniperScreen(
@@ -263,7 +282,7 @@ fun AppRoot(vm: AppViewModel) {
 
         if (!wide) {
             AnimatedVisibility(
-                visible = !dockHidden && !settingsOpen,
+                visible = !dockHidden && !settingsOpen && !togetherOpen,
                 enter = slideInVertically(motion.defaultSpatialSpec<IntOffset>()) { it * 2 },
                 exit = slideOutVertically(motion.defaultSpatialSpec<IntOffset>()) { it * 2 },
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp),
@@ -297,6 +316,27 @@ fun AppRoot(vm: AppViewModel) {
             )
         }
 
+        AnimatedVisibility(
+            visible = togetherOpen,
+            enter = slideInVertically(pageSpring<IntOffset>()) { it / 6 } + fadeIn(motion.fastEffectsSpec()),
+            exit = slideOutVertically(pageSpring<IntOffset>()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
+        ) {
+            TogetherScreen(
+                vm = together,
+                app = vm,
+                session = session,
+                onBack = { together.setOpen(false) },
+                modifier = Modifier
+                    .graphicsLayer {
+                        val scale = 1f - backProgress.value * 0.06f
+                        scaleX = scale
+                        scaleY = scale
+                        shape = RoundedCornerShape(36.dp * backProgress.value)
+                        clip = backProgress.value > 0f
+                    },
+            )
+        }
+
         justArmed?.let { task ->
             ArmedHero(
                 task = task,
@@ -313,6 +353,12 @@ fun AppRoot(vm: AppViewModel) {
             ?.let { task -> ResultHero(task = task, onDone = { vm.acknowledgeResult(task.id) }) }
     }
 
+    if (togetherSigningIn) {
+        TogetherSignInDialog(
+            onClose = { together.cancelSignIn() },
+            onToken = { together.finishSignIn(it) },
+        )
+    }
     if (signIn != null) {
         UmpointWebViewDialog(
             mode = WebViewMode.SIGN_IN,
