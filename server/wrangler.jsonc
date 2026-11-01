@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "umpoint-together",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "d1_databases": [
+    // database_id is filled in by `wrangler d1 create umpoint-together` before the first deploy.
+    { "binding": "DB", "database_name": "umpoint-together", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+  ],
+  "vars": {
+    // Only these Google Workspace domains may sign in.
+    "ALLOWED_DOMAINS": "siswa.um.edu.my,um.edu.my"
+  }
+  // Secrets (wrangler secret put): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, FIREBASE_SERVICE_ACCOUNT.
+}

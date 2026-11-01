@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Badge
@@ -65,6 +66,11 @@ import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 /** How far scrolling content must stop short of the screen's bottom edge to clear the dock. */
 val LocalBottomClearance = compositionLocalOf { 32.dp }
 
+/** The way into Play together, shown on every top-level screen with what's waiting for an answer. */
+class TogetherEntry(val waiting: Int, val onClick: () -> Unit)
+
+val LocalTogetherEntry = compositionLocalOf<TogetherEntry?> { null }
+
 /** A top-level screen: a flexible app bar that collapses as the content scrolls, and the avatar. */
 @Composable
 fun ScreenFrame(
@@ -77,7 +83,10 @@ fun ScreenFrame(
     Column(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection)) {
         MediumFlexibleTopAppBar(
             title = { Text(title) },
-            actions = { AccountButton(session, onAccount) },
+            actions = {
+                LocalTogetherEntry.current?.let { TogetherButton(it) }
+                AccountButton(session, onAccount)
+            },
             scrollBehavior = scroll,
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -85,6 +94,28 @@ fun ScreenFrame(
             ),
         )
         content()
+    }
+}
+
+@Composable
+private fun TogetherButton(entry: TogetherEntry) {
+    val source = remember { MutableInteractionSource() }
+    IconButton(
+        onClick = entry.onClick,
+        interactionSource = source,
+        modifier = Modifier.springPress(source, pressed = 0.8f),
+    ) {
+        BadgedBox(
+            badge = {
+                if (entry.waiting > 0) Badge { Text("${entry.waiting}") }
+            },
+        ) {
+            Icon(
+                Icons.Rounded.Groups,
+                contentDescription = if (entry.waiting > 0) "Play together, ${entry.waiting} waiting" else "Play together",
+                modifier = Modifier.size(28.dp),
+            )
+        }
     }
 }
 

@@ -7,7 +7,8 @@ The JDK comes from `org.gradle.java.home` in `gradle.properties`, and the SDK fr
 ```bash
 ./gradlew :app:assembleDebug        # debug build, package com.skylightlim.umpoint.debug
 ./gradlew :app:assembleRelease      # signed, minified release, package com.skylightlim.umpoint
-./gradlew :app:testDebugUnitTest    # sniper parser and booking-form tests
+./gradlew :app:testDebugUnitTest    # sniper parser, booking-form and Play together tests
+cd server && npm test               # Play together's server, on a real local D1
 ```
 
 Run the tests before declaring a task done. Release signing reads `UMPOINT_*` from `~/.gradle/gradle.properties`; the key never enters the repo.
@@ -20,7 +21,7 @@ Debug builds have a demo mode with made-up courts and no network. It shows over 
 adb -s <serial> shell am start -n com.skylightlim.umpoint.debug/com.skylightlim.umpoint.MainActivity --es umpoint_demo none
 ```
 
-Scenes: `none`, `armed`, `booked`, `failed`, `problem`, `signin`, `nogrid`. The `signin` scene opens the real sign-in page over the network, so treat it as a sign-in page.
+Scenes: `none`, `armed`, `booked`, `failed`, `problem`, `signin`, `nogrid`, `together`. The `signin` scene opens the real sign-in page over the network, so treat it as a sign-in page.
 
 To rehearse the midnight routine on a signed-in phone, add `--ez umpoint_dry_run true` to the same command with the app's own package. It runs in three minutes and books nothing. There is deliberately no button for this in the app.
 
@@ -31,6 +32,8 @@ Never read the screen (`uiautomator dump`, screenshots) while a sign-in page may
 - `sniper/`: the unattended midnight booking. Its alarm, service and booker run with no UI, so keep it free of Compose. R8 keeps this package as written.
 - `data/`: repository, cache and parsing.
 - `screens/` and `ui/`: Compose. See `DESIGN.md`.
+- `together/`: friends and open tenders (Play together). `Plan.kt` is the pure core that turns the server's state into armed snipes.
+- `server/`: its Cloudflare Worker and D1 database. `server/setup.sh` creates the accounts and deploys it.
 
 Three tabs (Courts, Sniper, Bookings) switch by state in `ui/AppRoot.kt`, with Settings behind the avatar. There is no navigation library: nothing deep-links.
 
@@ -39,3 +42,4 @@ Three tabs (Courts, Sniper, Bookings) switch by state in `ui/AppRoot.kt`, with S
 - Sniper changes need extra care: it fires once a week with nobody watching. One booking per action, courts tried one at a time, nothing cancelled on the user's behalf.
 - Never log or show other students' data. UMPoint exposes bookers' emails and matric numbers in taken cells.
 - Pin exact Material versions. Expressive APIs are in 1.5 beta, and `MaterialShapes` and `LoadingIndicator` are still experimental.
+- Play together's server decides who holds a half hour and nothing more. No UMPoint cookie, session or booking ever goes through it, and everything a phone needs at 00:00 stays in its own armed snipe.
