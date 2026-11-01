@@ -24,6 +24,14 @@ UM uses split DNS, so the answer depends on the network:
 
 The maintenance page's notice was dated 17 Oct and didn't list UMPoint, so it says nothing about when the site returns. To test from a phone without touching its screen, use `adb -s <serial> shell toybox nc -w 8 <host> 443`, where exit 0 means connected. Compare with `um.edu.my` as a control. `ping` always fails, but its first line shows the resolved address.
 
+### Badminton courts returning HTTP 500
+
+On the night of 1 Nov 2026 the site came back from the outage, but `POST /modules/mbook/` returned an empty 500 in about 160 ms for all four badminton spids, for every week tried and from the site's own "BOOK THIS SPACE" button. It isn't the app's request: squash and tennis courts load through the same URL and fields. The dashboard and login still worked, so a phone can look signed in and healthy while no court can be seen. Whether a booking POST fails the same way is unknown, because testing it would book. Courts now offers a stand-in list of next week's slots when the grid won't load, so a snipe can still be armed.
+
+To tell this fault from the app: `goBook(spid)` in `/modules/mbp/list.php?catid=39&dep=156` is the site's own route to a court. `GET /modules/mbook/` always redirects to `/modules/mbp/`, and `/modules/mbp/` draws the search page or a pricing error for these courts rather than a grid, so neither one means the module moved.
+
+Forms and weeks, checked on a squash grid that night: `calflag=n` honours `theday` and `calflag=t` means the server's current week, ignoring `theday`. On a Sunday `t` draws the coming Monday's week, while its hidden `tweek` still says the week before. Squash's form has a hidden empty `gclocation` where the badminton form captured on 22 Oct had `srchtype`. `participantemail` is inside an HTML comment, so it isn't sent.
+
 ## Material 3 Expressive
 
 Good official pages:

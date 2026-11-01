@@ -84,6 +84,7 @@ import com.skylightlim.umpoint.data.ago
 import com.skylightlim.umpoint.data.dateMs
 import com.skylightlim.umpoint.data.dayLabel
 import com.skylightlim.umpoint.data.nextRollover
+import com.skylightlim.umpoint.data.openWeek
 import com.skylightlim.umpoint.data.shortDay
 import com.skylightlim.umpoint.sniper.Task
 import com.skylightlim.umpoint.sniper.Umpoint
@@ -230,7 +231,9 @@ fun CourtsScreen(
                     .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = clearance),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                val data = state.data
+                // UMPoint can fail to draw a week while still working otherwise, so a snipe doesn't depend on seeing it.
+                val standIn = state.data == null && state.error != null && choice.week == WeekType.NEXT && choice.bookable
+                val data = state.data ?: if (standIn) remember(rollover) { openWeek(rollover) } else null
                 when {
                     visible.none { it.bookable } && !showPassed -> EmptyState(
                         icon = Icons.Rounded.EventBusy,
@@ -247,6 +250,12 @@ fun CourtsScreen(
                         LoadingIndicator(Modifier.size(64.dp))
                     }
                     else -> {
+                        if (standIn) {
+                            Note(
+                                "UMPoint can’t show these courts right now, so every half hour is listed as open. You can still arm a snipe, but it only works if UMPoint is taking bookings at 00:00.",
+                                NoteTone.WARN,
+                            )
+                        }
                         if (!choice.bookable) {
                             Note(
                                 when {

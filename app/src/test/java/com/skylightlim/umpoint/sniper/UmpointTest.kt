@@ -1,5 +1,8 @@
 package com.skylightlim.umpoint.sniper
 
+import com.skylightlim.umpoint.data.SlotStatus
+import com.skylightlim.umpoint.data.SlotTime
+import com.skylightlim.umpoint.data.openWeek
 import com.skylightlim.umpoint.sniper.Grid.State
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -75,6 +78,17 @@ class UmpointTest {
     val two = Umpoint.bookingFields(task("27-10-2026", "17:00", "19:00"), "2", 1792944000L, "26-10-2026").toMap()
     assertEquals("27-10-2026/18:30/19:00/06:30 PM/07:00 pm", two["eddateselected"])
     assertEquals("21199", two["spid"])
+  }
+
+  @Test
+  fun openWeekOffersEveryWeekdayHalfHourOnEveryCourt() {
+    val g = openWeek(Umpoint.rolloverFor("03-11-2026"))
+    assertEquals(listOf("02-11-2026", "03-11-2026", "04-11-2026", "05-11-2026", "06-11-2026"), g.dates)
+    assertEquals(20, g.times.size)
+    assertEquals(SlotTime("09:00", "09:30"), g.times.first())
+    assertEquals(SlotTime("18:30", "19:00"), g.times.last())
+    assertEquals(listOf("1", "2", "3", "4"), g.freeCourts("03-11-2026", "18:00", "19:00"))
+    assertEquals(SlotStatus.UNAVAILABLE, g.status("07-11-2026", "09:00", "1"))
   }
 
   @Test

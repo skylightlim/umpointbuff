@@ -139,6 +139,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             backgroundRestricted = false,
         )
         if (scene == "signin") requestSignIn()
+        if (scene == "nogrid") _nextWeek.value = WeekUiState(error = "UMPoint returned HTTP 500.")
     }
 
     /** Runs the midnight routine in three minutes without booking; not in the UI, launched over adb. */

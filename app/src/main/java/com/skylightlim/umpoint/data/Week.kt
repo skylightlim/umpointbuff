@@ -145,6 +145,24 @@ fun mergeWeek(week: WeekType, grids: List<Pair<String, Grid>>): WeekGrid {
     )
 }
 
+/**
+ * The week starting [monday] with every weekday half hour open, for when UMPoint can't draw the real
+ * one. Before a week rolls over nothing in it can be booked, so this only stands in for picking a snipe.
+ */
+fun openWeek(monday: Long): WeekGrid {
+    val close = Umpoint.minutes(Umpoint.CLOSE)
+    val times = (9 * 60 until close step 30).map { SlotTime(Umpoint.hhmm(it), Umpoint.hhmm(it + 30)) }
+    val dates = (0..4).map { Umpoint.mytDate(monday + it * DAY) }
+    val open = CourtIds.ALL.associateWith { SlotStatus.FREE }
+    return WeekGrid(
+        week = WeekType.NEXT,
+        dates = dates,
+        times = times,
+        status = dates.associateWith { times.associate { t -> t.start to open } },
+        serverToday = Umpoint.mytDate(System.currentTimeMillis()),
+    )
+}
+
 // ---------------------------------------------------------------- cache JSON
 
 fun WeekGrid.toJson(): JSONObject {

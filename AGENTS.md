@@ -20,7 +20,7 @@ Debug builds have a demo mode with made-up courts and no network. It shows over 
 adb -s <serial> shell am start -n com.skylightlim.umpoint.debug/com.skylightlim.umpoint.MainActivity --es umpoint_demo none
 ```
 
-Scenes: `none`, `armed`, `booked`, `failed`, `problem`, `signin`. The `signin` scene opens the real sign-in page over the network, so treat it as a sign-in page.
+Scenes: `none`, `armed`, `booked`, `failed`, `problem`, `signin`, `nogrid`. The `signin` scene opens the real sign-in page over the network, so treat it as a sign-in page.
 
 To rehearse the midnight routine on a signed-in phone, add `--ez umpoint_dry_run true` to the same command with the app's own package. It runs in three minutes and books nothing. There is deliberately no button for this in the app.
 
