@@ -26,24 +26,22 @@ object Together {
 
     fun signedIn(ctx: Context) = prefs(ctx).getString("token", null) != null
 
-    fun signInUrl(state: String) = "${BuildConfig.TOGETHER_URL}/auth/start?state=$state"
-
-    fun doneUrl() = "${BuildConfig.TOGETHER_URL}/auth/done"
-
     fun cached(ctx: Context): TogetherState? = runCatching {
         prefs(ctx).getString("state", null)?.let { togetherStateFromJson(JSONObject(it)) }
     }.getOrNull()
 
-    fun finishSignIn(ctx: Context, token: String): TogetherState {
-        prefs(ctx).edit().putString("token", token).commit()
+    /** Makes the account. The friend code is permanent, so nothing here or on the server can change it. */
+    fun create(ctx: Context, code: String, name: String): TogetherState =
+        openAccount(ctx, call(ctx, "POST", "/auth/create", JSONObject().put("code", code).put("name", name)))
+
+    /** Brings an account back with its recovery key, and signs out any other phone holding it. */
+    fun restore(ctx: Context, key: String): TogetherState =
+        openAccount(ctx, call(ctx, "POST", "/auth/restore", JSONObject().put("key", key)))
+
+    private fun openAccount(ctx: Context, answer: String): TogetherState {
+        prefs(ctx).edit().putString("token", JSONObject(answer).getString("token")).commit()
         TogetherPush.register(ctx)
         return sync(ctx)
-    }
-
-    /** Forgets this phone's account. Snipes already armed stay armed: they're the user's own. */
-    fun signOut(ctx: Context) {
-        runCatching { call(ctx, "POST", "/session/end", JSONObject()) }
-        prefs(ctx).edit().remove("token").remove("state").commit()
     }
 
     fun sendDeviceToken(ctx: Context, token: String) {
@@ -153,7 +151,7 @@ object Together {
             val text = (if (code < 400) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code == 401) {
                 prefs(ctx).edit().remove("token").apply()
-                throw TogetherError("Sign in to Play together again.", signedOut = true)
+                throw TogetherError("This phone needs your recovery key.", signedOut = true)
             }
             if (code >= 400) {
                 throw TogetherError(runCatching { JSONObject(text).getString("error") }.getOrDefault("The server said HTTP $code."))
@@ -166,5 +164,5 @@ object Together {
         }
     }
 
-    fun emails(list: Collection<String>) = JSONArray(list.toList())
+    fun codes(list: Collection<String>) = JSONArray(list.toList())
 }

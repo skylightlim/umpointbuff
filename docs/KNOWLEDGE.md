@@ -109,10 +109,14 @@ Minus also bundles a `TopSheet`, swipe actions and tutorial hints worth reading 
 - The owner says UMPoint takes only 30 minutes per booking, which is why the relay exists. The only real booking traced so far (Oct 2026) was 30 minutes, and the app's 1-hour solo snipe has never been tried. Recheck this against the first real results.
 - A relay can't fall back between courts: phones can't confer at 00:00, so `anyCourt` is off and a lost half hour leaves a gap.
 - Arming is one path: `planSync` turns server state into steps, so a push, a poll and a tap all behave alike. Solo snipes never match its id format, so it can't touch them.
-- Debug builds take `-PUMPOINT_TOGETHER_URL=http://127.0.0.1:8787` (with `adb reverse tcp:8787 tcp:8787` and `npm run dev`) and `--es umpoint_together_dev <email>` to sign in without Google. Add `--es umpoint_demo none` to get past the UMPoint sign-in on a phone with no session.
+- Debug builds take `-PUMPOINT_TOGETHER_URL=http://127.0.0.1:8787` (with `adb reverse tcp:8787 tcp:8787` and `npm run dev`). Add `--es umpoint_demo none` to get past the UMPoint sign-in on a phone with no session.
 - `-PUMPOINT_DEBUG_SUFFIX=.together` installs beside another checkout's debug build. An armed test task really rings at 23:50, so uninstall the test package afterwards.
 - Free Workers get 10 ms of CPU. RSA signing took about 10 ms cold and 2 ms warm in Node, so the FCM token is cached in D1. Not yet measured on Cloudflare itself.
-- Unknown until someone signs in: whether UM's Google Workspace admins allow a third-party OAuth app. `setup.sh` ends by testing it.
+- Accounts are a friend code the person picks once, not a Google login (owner's decision, 2 Nov 2026). The code is the account's id, so no route can change it.
+- The server keeps each recovery key readable on purpose: every user is the owner's friend, and `server/keys.sh` is how the owner hands a lost key back. It uses the owner's Cloudflare login, so there's no admin route to attack. Session tokens stay hashed.
+- A key only reaches Play together: friends, invites and who holds a half hour. It can't reach anyone's UMPoint account, which stays on their own phone.
+- Restoring signs out the old phone and forgets its push token, so two phones can't both snipe one half hour. There's deliberately no log-out button, because nothing but the key could bring the account back.
+- The worker is open to anyone holding the app, so `/auth/create` allows `SIGNUPS_PER_HOUR` per network (default 10). Campus Wi-Fi may share one address, so a group joining together could hit it.
 
 ## Decisions, so they aren't reopened
 

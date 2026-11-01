@@ -1,10 +1,16 @@
 export interface AuthEnv {
   DB: D1Database;
-  ALLOWED_DOMAINS: string;
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  /** Local development only: never set on the deployed worker. */
-  DEV_LOGIN?: string;
+  /** New accounts one network may make in an hour. The worker is open to anyone holding the app. */
+  SIGNUPS_PER_HOUR?: string;
+}
+
+/** An answer the app shows the user as written. */
+export class Refuse extends Error {
+  status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
 }
 
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -12,85 +18,66 @@ const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString
 export const hashToken = async (token: string) =>
   hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
 
-export const emailAllowed = (env: Pick<AuthEnv, "ALLOWED_DOMAINS">, email: string) =>
-  env.ALLOWED_DOMAINS.split(",").includes(email.split("@")[1] ?? "");
+export const cleanCode = (value: unknown) => String(value ?? "").trim().toLowerCase();
 
-export interface GoogleClaims {
-  aud: string;
-  email?: string;
-  email_verified?: boolean;
-  hd?: string;
-  name?: string;
+export const validCode = (code: string) => /^[a-z0-9]{3,20}$/.test(code);
+
+// Crockford base32: no I, L, O or U, so a key read out over a chat can't be misread.
+const KEY_LETTERS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+export function newKey(): string {
+  const letters = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => KEY_LETTERS[b & 31]);
+  return letters.join("").replace(/(.{4})(?=.)/g, "$1-");
 }
 
-/** hd is what proves a Workspace account: a personal Google account can't carry UM's domain in it. */
-export function claimsAllowed(claims: GoogleClaims, clientId: string, domains: string): boolean {
-  const email = (claims.email ?? "").toLowerCase();
-  return claims.aud === clientId && claims.email_verified === true &&
-    claims.hd === email.split("@")[1] && emailAllowed({ ALLOWED_DOMAINS: domains }, email);
+export function cleanKey(value: unknown): string {
+  const letters = String(value ?? "").toUpperCase().replace(/O/g, "0").replace(/[IL]/g, "1").replace(/[^0-9A-Z]/g, "");
+  return letters.replace(/(.{4})(?=.)/g, "$1-");
 }
 
-/** Makes the user if they're new and returns a fresh bearer token. */
-export async function openSession(env: AuthEnv, email: string, name: string): Promise<string> {
+async function openSession(env: AuthEnv, code: string): Promise<string> {
   const token = hex(crypto.getRandomValues(new Uint8Array(32)).buffer);
-  const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO users (email, name, created_at) VALUES (?, ?, ?) ON CONFLICT(email) DO UPDATE SET name = excluded.name")
-      .bind(email, name, now),
-    env.DB.prepare("INSERT INTO sessions (token_hash, email, created_at) VALUES (?, ?, ?)")
-      .bind(await hashToken(token), email, now),
-  ]);
+  await env.DB.prepare("INSERT INTO sessions (token_hash, code, created_at) VALUES (?, ?, ?)")
+    .bind(await hashToken(token), code, Date.now()).run();
   return token;
 }
 
-export function startGoogle(env: AuthEnv, origin: string, state: string): Response {
-  if (!env.GOOGLE_CLIENT_ID) return doneRedirect(origin, state, { error: "not_configured" });
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.search = new URLSearchParams({
-    client_id: env.GOOGLE_CLIENT_ID,
-    redirect_uri: `${origin}/auth/callback`,
-    response_type: "code",
-    scope: "openid email profile",
-    state,
-    prompt: "select_account",
-  }).toString();
-  return Response.redirect(url.toString(), 302);
+/** Only taken attempts skip this, so picking a code that's gone doesn't use up the allowance. */
+async function countSignup(env: AuthEnv, req: Request) {
+  const network = await hashToken(req.headers.get("cf-connecting-ip") ?? "local");
+  const hour = Math.floor(Date.now() / 3_600_000);
+  const [, row] = await env.DB.batch<{ n: number }>([
+    env.DB.prepare("DELETE FROM signups WHERE hour < ?").bind(hour),
+    env.DB.prepare("INSERT INTO signups (network, hour, n) VALUES (?, ?, 1) ON CONFLICT(network, hour) DO UPDATE SET n = n + 1 RETURNING n")
+      .bind(network, hour),
+  ]);
+  if (row.results[0].n > Number(env.SIGNUPS_PER_HOUR ?? 10)) {
+    throw new Refuse("Too many new accounts from this network. Try again in an hour.", 429);
+  }
 }
 
-/** The app's WebView stops at /auth/done and reads the token from the fragment, which no server sees. */
-function doneRedirect(origin: string, state: string, out: { token?: string; error?: string }): Response {
-  const query = new URLSearchParams({ state });
-  if (out.error) query.set("error", out.error);
-  const fragment = out.token ? `#token=${out.token}` : "";
-  return Response.redirect(`${origin}/auth/done?${query}${fragment}`, 302);
+/** The code is the account's id for good, so no route ever changes it. */
+export async function createAccount(env: AuthEnv, req: Request, body: Record<string, unknown>) {
+  const code = cleanCode(body.code);
+  if (!validCode(code)) throw new Refuse("A friend code is 3 to 20 letters or numbers.");
+  const name = String(body.name ?? "").trim().slice(0, 30) || code;
+  const taken = new Refuse("That friend code is taken. Try another.", 409);
+  if (await env.DB.prepare("SELECT 1 FROM users WHERE code = ?").bind(code).first()) throw taken;
+  await countSignup(env, req);
+  const inserted = await env.DB.prepare(
+    "INSERT INTO users (code, name, recovery_key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING code",
+  ).bind(code, name, newKey(), Date.now()).first();
+  if (!inserted) throw taken;
+  return { token: await openSession(env, code) };
 }
 
-export async function finishGoogle(env: AuthEnv, origin: string, url: URL): Promise<Response> {
-  const state = url.searchParams.get("state") ?? "";
-  const code = url.searchParams.get("code");
-  if (!code || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return doneRedirect(origin, state, { error: "cancelled" });
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: `${origin}/auth/callback`,
-      grant_type: "authorization_code",
-    }),
-  });
-  if (!res.ok) return doneRedirect(origin, state, { error: "google" });
-  const { id_token } = (await res.json()) as { id_token: string };
-  // Fetched straight from Google over TLS with our secret, so its signature needs no second check.
-  const base64 = id_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-  const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)))) as GoogleClaims;
-  if (!claimsAllowed(claims, env.GOOGLE_CLIENT_ID, env.ALLOWED_DOMAINS)) return doneRedirect(origin, state, { error: "domain" });
-  const email = claims.email!.toLowerCase();
-  return doneRedirect(origin, state, { token: await openSession(env, email, claims.name ?? email.split("@")[0]) });
+/** Moves the account here and signs out any other phone, so two phones can't both snipe its half hours. */
+export async function restoreAccount(env: AuthEnv, body: Record<string, unknown>) {
+  const row = await env.DB.prepare("SELECT code FROM users WHERE recovery_key = ?").bind(cleanKey(body.key)).first<{ code: string }>();
+  if (!row) throw new Refuse("That recovery key doesn't match any account.", 404);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM devices WHERE code = ?").bind(row.code),
+    env.DB.prepare("DELETE FROM sessions WHERE code = ?").bind(row.code),
+  ]);
+  return { token: await openSession(env, row.code) };
 }
-
-export const donePage = () =>
-  new Response("<!doctype html><title>UMPoint Badminton</title><p>You can go back to the app.</p>", {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });

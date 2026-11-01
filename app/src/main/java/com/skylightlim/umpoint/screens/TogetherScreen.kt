@@ -20,13 +20,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Groups
-import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material3.AlertDialog
@@ -97,6 +98,8 @@ import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 
 private const val SIGN_IN_FIRST = "Sign in to UMPoint first, so your phone can book at 00:00."
 private val LENGTHS = listOf(2 to "1 h", 3 to "1.5 h", 4 to "2 h", 5 to "2.5 h", 6 to "3 h")
+private const val CODE_MIN = 3
+private const val CODE_MAX = 20
 private val STARTS = (18 until 38).map { Umpoint.hhmm(it * 30) }
 
 /** A sheet or dialog waiting on the user: only one can be up at a time. */
@@ -106,6 +109,7 @@ private sealed interface Ask {
     data class GiveUp(val lobby: Lobby) : Ask
     data class CallOff(val lobby: Lobby) : Ask
     data class RemoveFriend(val friend: Friend) : Ask
+    data class ShowKey(val key: String) : Ask
 }
 
 @Composable
@@ -154,7 +158,13 @@ fun TogetherScreen(
                         title = "Not set up yet",
                         text = "This build has no Play together server. Everything else works as usual.",
                     )
-                    !signedIn || current == null -> SignedOut(busy = busy, onSignIn = { vm.startSignIn() })
+                    !signedIn -> JoinForm(busy = busy, onCreate = vm::createAccount, onRestore = vm::restore)
+                    current == null -> EmptyState(
+                        icon = Icons.Rounded.Groups,
+                        title = "Can’t load your friends",
+                        text = "Your account is safe. Check your connection and try again.",
+                        action = { Button(onClick = { vm.refresh() }, enabled = !busy, shapes = ButtonDefaults.shapes()) { Text("Try again") } },
+                    )
                     else -> SignedIn(
                         state = current,
                         tasks = tasks,
@@ -216,7 +226,7 @@ fun TogetherScreen(
         is Ask.InviteMore -> state?.let { s ->
             InviteMoreSheet(
                 lobby = asking.lobby,
-                friends = s.acceptedFriends.filter { f -> asking.lobby.invites.none { it.email == f.email } },
+                friends = s.acceptedFriends.filter { f -> asking.lobby.invites.none { it.code == f.code } },
                 onDismiss = { ask = null },
                 onInvite = {
                     vm.inviteMore(asking.lobby, it)
@@ -245,8 +255,20 @@ fun TogetherScreen(
             text = "Sessions you’re both in carry on. You just can’t invite each other any more.",
             action = "Remove",
             keep = "Keep",
-            onConfirm = { vm.removeFriend(asking.friend.email) },
+            onConfirm = { vm.removeFriend(asking.friend.code) },
             onDismiss = { ask = null },
+        )
+        is Ask.ShowKey -> AlertDialog(
+            onDismissRequest = { ask = null },
+            icon = { Icon(Icons.Rounded.Key, contentDescription = null) },
+            title = { Text("Your recovery key") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SelectionContainer { Text(asking.key, style = MaterialTheme.typography.titleMedium) }
+                    Text("Enter it on a new phone to bring back your code and friends. If you lose it, ask the friend who runs this app.")
+                }
+            },
+            confirmButton = { TextButton(onClick = { ask = null }) { Text("Done") } },
         )
     }
 }
@@ -269,18 +291,80 @@ private fun Confirm(title: String, text: String, action: String, keep: String, o
     )
 }
 
+/** Keeps only what a friend code can hold, so the field shows exactly the code the person will get. */
+private fun codeInput(text: String) = text.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }.take(CODE_MAX)
+
 @Composable
-private fun SignedOut(busy: Boolean, onSignIn: () -> Unit) {
-    EmptyState(
-        icon = Icons.Rounded.Groups,
-        title = "Book longer, together",
-        text = "Open a session, and friends each take the next half hour. At 00:00 on Monday every phone books its own part, under its own account.",
-        action = {
-            Button(onClick = onSignIn, enabled = !busy, shapes = ButtonDefaults.shapes()) {
-                Text("Sign in with SiswaMail")
+private fun JoinForm(busy: Boolean, onCreate: (code: String, name: String) -> Unit, onRestore: (key: String) -> Unit) {
+    var restoring by rememberSaveable { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
+    var key by rememberSaveable { mutableStateOf("") }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding(),
+    ) {
+        EmptyState(
+            icon = Icons.Rounded.Groups,
+            title = if (restoring) "Welcome back" else "Book longer, together",
+            text = if (restoring) {
+                "Your recovery key brings back your friend code and friends, and signs out your old phone."
+            } else {
+                "Open a session, and friends each take the next half hour. At 00:00 on Monday every phone books its own part, under its own account."
+            },
+        )
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (restoring) {
+                OutlinedTextField(
+                    value = key,
+                    // Left as typed, because the server ignores case and spacing: rewriting a field mid-typing can drop characters.
+                    onValueChange = { key = it },
+                    label = { Text("Recovery key") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { onRestore(key) },
+                    enabled = key.isNotBlank() && !busy,
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                ) { Text("Bring back my account") }
+            } else {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(30) },
+                    label = { Text("Your name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = codeInput(it) },
+                    label = { Text("Your friend code") },
+                    supportingText = { Text("$CODE_MIN to $CODE_MAX letters or numbers. You can’t change it later.") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { onCreate(code, name.trim()) },
+                    enabled = name.isNotBlank() && code.length >= CODE_MIN && !busy,
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                ) { Text(if (code.length >= CODE_MIN) "Create “$code”" else "Create my account", maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-        },
-    )
+            TextButton(
+                onClick = { restoring = !restoring },
+                shapes = ButtonDefaults.shapes(),
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) { Text(if (restoring) "I’m new here" else "I already have an account") }
+        }
+    }
 }
 
 @Composable
@@ -293,7 +377,7 @@ private fun SignedIn(
     onAsk: (Ask) -> Unit,
     onAccept: (Lobby) -> Unit,
 ) {
-    val me = state.me.email
+    val me = state.me.code
     val invites = state.lobbies.filter { it.responseOf(me) == "pending" && !it.closedAt(now) }
     // Includes ones the user said no to: while the tender is open they can still change their mind.
     val sessions = state.lobbies.filter { it !in invites }
@@ -331,7 +415,7 @@ private fun SignedIn(
                         me = me,
                         now = now,
                         busy = busy,
-                        hasFriendsLeft = state.acceptedFriends.any { f -> lobby.invites.none { it.email == f.email } },
+                        hasFriendsLeft = state.acceptedFriends.any { f -> lobby.invites.none { it.code == f.code } },
                         onJoin = { onAccept(lobby) },
                         onAsk = onAsk,
                     )
@@ -342,11 +426,11 @@ private fun SignedIn(
         SegmentRow(
             shape = segmentShape(0, 1),
             title = state.me.name,
-            subtitle = state.me.email,
+            subtitle = "Your friend code: ${state.me.code}",
             icon = Icons.Rounded.Person,
             trailing = {
-                IconButton(onClick = { vm.signOut() }) {
-                    Icon(Icons.Rounded.Logout, contentDescription = "Sign out of Play together")
+                IconButton(onClick = { onAsk(Ask.ShowKey(state.me.key)) }) {
+                    Icon(Icons.Rounded.Key, contentDescription = "Show your recovery key")
                 }
             },
         )
@@ -513,14 +597,14 @@ private fun Chip(text: String, container: Color, content: Color) {
 private fun FriendsSection(friends: List<Friend>, busy: Boolean, vm: TogetherViewModel, onAsk: (Ask) -> Unit) {
     val colors = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
-    var email by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
     val ordered = friends.sortedWith(compareBy({ it.status != FriendStatus.INCOMING }, { it.status != FriendStatus.ACCEPTED }, { it.name.lowercase() }))
     val count = ordered.size + 1
 
     fun add() {
-        if (email.isBlank()) return
-        vm.addFriend(email)
-        email = ""
+        if (code.isBlank()) return
+        vm.addFriend(code)
+        code = ""
         focus.clearFocus()
     }
 
@@ -532,18 +616,18 @@ private fun FriendsSection(friends: List<Friend>, busy: Boolean, vm: TogetherVie
                     shape = segmentShape(index, count),
                     title = friend.name,
                     subtitle = when (friend.status) {
-                        FriendStatus.ACCEPTED -> friend.email
+                        FriendStatus.ACCEPTED -> friend.code
                         FriendStatus.INCOMING -> "Wants to play together"
                         FriendStatus.OUTGOING -> "Waiting for them to accept"
                     },
                     icon = Icons.Rounded.Person,
                     trailing = {
                         if (friend.status == FriendStatus.INCOMING) {
-                            FilledTonalButton(onClick = { vm.answerFriend(friend.email, true) }, enabled = !busy, shapes = ButtonDefaults.shapes()) { Text("Accept") }
+                            FilledTonalButton(onClick = { vm.answerFriend(friend.code, true) }, enabled = !busy, shapes = ButtonDefaults.shapes()) { Text("Accept") }
                         }
                         IconButton(
                             onClick = {
-                                if (friend.status == FriendStatus.INCOMING) vm.answerFriend(friend.email, false) else onAsk(Ask.RemoveFriend(friend))
+                                if (friend.status == FriendStatus.INCOMING) vm.answerFriend(friend.code, false) else onAsk(Ask.RemoveFriend(friend))
                             },
                             enabled = !busy,
                         ) {
@@ -554,19 +638,19 @@ private fun FriendsSection(friends: List<Friend>, busy: Boolean, vm: TogetherVie
             }
             Surface(shape = segmentShape(ordered.size, count), color = colors.surfaceBright) {
                 OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Add by SiswaMail") },
+                    value = code,
+                    onValueChange = { code = codeInput(it) },
+                    label = { Text("Add by friend code") },
                     singleLine = true,
                     trailingIcon = {
-                        IconButton(onClick = ::add, enabled = email.isNotBlank() && !busy) {
+                        IconButton(onClick = ::add, enabled = code.isNotBlank() && !busy) {
                             Icon(Icons.Rounded.PersonAdd, contentDescription = "Send friend request")
                         }
                     },
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.None,
                         autoCorrectEnabled = false,
-                        keyboardType = KeyboardType.Email,
+                        keyboardType = KeyboardType.Ascii,
                         imeAction = ImeAction.Send,
                     ),
                     keyboardActions = KeyboardActions(onSend = { add() }),
@@ -717,10 +801,10 @@ private fun InviteMoreSheet(lobby: Lobby, friends: List<Friend>, onDismiss: () -
 private fun FriendPicker(friends: List<Friend>, invited: MutableList<String>) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         friends.forEach { friend ->
-            val on = friend.email in invited
+            val on = friend.code in invited
             FilterChip(
                 selected = on,
-                onClick = { if (on) invited.remove(friend.email) else invited.add(friend.email) },
+                onClick = { if (on) invited.remove(friend.code) else invited.add(friend.code) },
                 label = { Text(friend.name, maxLines = 1) },
                 modifier = Modifier.heightIn(min = 48.dp),
             )

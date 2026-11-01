@@ -22,7 +22,7 @@ Success: the user arms a snipe in under a minute, goes to sleep trusting it, and
 
 The sniper runs on the user's own phone (a Kotlin alarm and foreground service), not on a server. No one else's account, no shared bot, no server mode ever.
 
-Play together has a small server, but it only coordinates: who is friends with whom, and who took which half hour. Every booking still goes from the holder's own phone under their own account.
+Play together has a small server, but it only coordinates: who is friends with whom, and who took which half hour. Friends join it with a friend code they pick once, so it needs no SiswaMail. The owner can look up any friend's recovery key. Every booking still goes from the holder's own phone under their own account.
 
 ## Operating Context
 

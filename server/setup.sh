@@ -183,7 +183,7 @@ finish() {
 # STAGES: Play together's accounts. Safe to re-run: every stage keeps what's done.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=8
+TOTAL_STAGES=6
 cd "$(dirname "$0")"
 
 # Gradle reads these when building the app; the signing key's settings already live here.
@@ -203,7 +203,7 @@ fi
 
 stage "Cloudflare: database and server"
 say "Creates the database, applies the tables and publishes the worker."
-note "It holds emails, names and session plans. It never sees a UMPoint session."
+note "It holds friend codes, names, recovery keys and session plans. It never sees a UMPoint session."
 confirm "Create and publish them now?" || exit 1
 d1_id() { npx wrangler d1 list --json | python3 -c "import json,sys;print(next((d['uuid'] for d in json.load(sys.stdin) if d['name']=='umpoint-together'),''))"; }
 DB_ID=$(d1_id)
@@ -269,47 +269,12 @@ if confirm "The worker has it now. Delete the downloaded copy?"; then
 fi
 pause "Press Enter to continue"
 
-stage "Google: sign-in screen"
-say "Firebase made a Google Cloud project. The sign-in screen lives there."
-open_url "https://console.cloud.google.com/auth/overview?project=$FIREBASE_PROJECT"
-step "If it says it isn't configured, click Get started."
-step "App name UMPoint Badminton, your email for support and contact, audience External."
-step "On the Audience page, click Publish app so it leaves Testing."
-note "Testing mode only admits listed test users. Only email and profile are requested,"
-note "which are non-sensitive scopes, so Google shouldn't require a review for this."
-note "Menu names here may have moved. If a step doesn't match, look for the same words nearby."
-pause "Press Enter when the app is published"
-
-stage "Google: sign-in keys"
-open_url "https://console.cloud.google.com/auth/clients/create?project=$FIREBASE_PROJECT"
-step "Application type: Web application. Name: Play together server."
-step "Add this under Authorized redirect URIs, exactly:"
-printf '\n      %s%s/auth/callback%s\n\n' "$BOLD" "$SERVER_URL" "$RESET"
-step "Create it, and copy the Client ID and Client secret it shows."
-ask GOOGLE_CLIENT_ID "Paste the Client ID:"
-ask_secret GOOGLE_CLIENT_SECRET "Paste the Client secret (hidden):"
-printf '%s' "$GOOGLE_CLIENT_ID" | npx wrangler secret put GOOGLE_CLIENT_ID
-printf '%s' "$GOOGLE_CLIENT_SECRET" | npx wrangler secret put GOOGLE_CLIENT_SECRET
-pause "Press Enter to continue"
-
 stage "Check it works"
 sleep 5
 STATE_CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$SERVER_URL/state" || true)
-START_TARGET=$(curl -s -m 15 -o /dev/null -w '%{redirect_url}' "$SERVER_URL/auth/start?state=check" || true)
-DEV_CODE=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -X POST -d '{}' "$SERVER_URL/auth/dev" || true)
-[[ "$STATE_CODE" == 401 ]] && say "✓ The server refuses requests without a sign-in." || warn "/state answered $STATE_CODE, expected 401."
-[[ "$DEV_CODE" == 401 ]] && say "✓ The test-only sign-in is off." || warn "/auth/dev answered $DEV_CODE, expected 401. Don't use this server until that's fixed."
-if [[ "$START_TARGET" == https://accounts.google.com/* && "$START_TARGET" == *"$GOOGLE_CLIENT_ID"* ]]; then
-  say "✓ Sign-in goes to Google with your client."
-else
-  warn "Sign-in didn't go to Google with your client: $START_TARGET"
-fi
-step "Open this on your phone, and sign in with SiswaMail:"
-printf '\n      %s%s/auth/start?state=check%s\n\n' "$BOLD" "$SERVER_URL" "$RESET"
-note "You should land on a page saying you can go back to the app. If Google says"
-note "the app is blocked by your organisation, UM's admins don't allow it, and Play"
-note "together needs another way to sign in. Nothing else about the app is affected."
+[[ "$STATE_CODE" == 401 ]] && say "✓ The server refuses requests without an account." || warn "/state answered $STATE_CODE, expected 401."
 pause "Press Enter to finish"
 
 finish
 say "Rebuild the app so it picks up the new values: ./gradlew :app:assembleRelease"
+say "Recovery keys, for a friend who lost theirs: ./keys.sh [friend code]"

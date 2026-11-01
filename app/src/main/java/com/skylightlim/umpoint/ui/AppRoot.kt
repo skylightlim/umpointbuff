@@ -87,7 +87,6 @@ import com.skylightlim.umpoint.ui.components.FloatingDock
 import com.skylightlim.umpoint.ui.components.LocalBottomClearance
 import com.skylightlim.umpoint.ui.components.LocalTogetherEntry
 import com.skylightlim.umpoint.ui.components.TogetherEntry
-import com.skylightlim.umpoint.ui.components.TogetherSignInDialog
 import com.skylightlim.umpoint.ui.components.UmpointWebViewDialog
 import com.skylightlim.umpoint.ui.components.WebViewMode
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
@@ -142,7 +141,6 @@ fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
     val seen by vm.seenResults.collectAsStateWithLifecycle()
     val togetherOpen by together.open.collectAsStateWithLifecycle()
     val togetherState by together.state.collectAsStateWithLifecycle()
-    val togetherSigningIn by together.signingIn.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val saved = rememberSaveableStateHolder()
     val motion = MaterialTheme.motionScheme
@@ -353,12 +351,6 @@ fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
             ?.let { task -> ResultHero(task = task, onDone = { vm.acknowledgeResult(task.id) }) }
     }
 
-    if (togetherSigningIn) {
-        TogetherSignInDialog(
-            onClose = { together.cancelSignIn() },
-            onToken = { together.finishSignIn(it) },
-        )
-    }
     if (signIn != null) {
         UmpointWebViewDialog(
             mode = WebViewMode.SIGN_IN,

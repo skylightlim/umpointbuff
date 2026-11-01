@@ -55,7 +55,7 @@ Material's guidance is one or two per product. These are the two, and full shape
 - **Sniper:** problems first, only when something is wrong, each with a Fix button. Then the countdown, next week's two slots as shuttles, the sourced rules, and collapsed history. There is no readiness checklist and no test-run button.
 - **Bookings:** grouped by week, calm. Cancelling opens UMPoint's own page.
 - **Settings:** a secondary page behind the avatar.
-- **Play together:** a secondary page behind the people icon beside the avatar, whose badge counts answers waiting. Invites first, then sessions, then friends. Each half hour names its holder and carries a word: Armed for your own, Taken for someone else's, since this phone can't know theirs is armed.
+- **Play together:** a secondary page behind the people icon beside the avatar, whose badge counts answers waiting. Invites first, then sessions, then friends. Before an account exists it shows a form for a name and a permanent friend code, or a recovery key. Each half hour names its holder and carries a word: Armed for your own, Taken for someone else's, since this phone can't know theirs is armed.
 
 A shuttle's shape shows its state: circle and dashed when empty, cookie when armed, burst when booked. `ShuttleBadge` morphs between them. It is the app's one custom motif.
 

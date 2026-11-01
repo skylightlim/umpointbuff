@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { claimsAllowed } from "../src/auth.ts";
+import { cleanCode, cleanKey, newKey, validCode } from "../src/auth.ts";
 import { planSession, rolloverFor } from "../src/rules.ts";
 
 const NOW = Date.UTC(2026, 9, 31, 12); // Sat 31 Oct 2026, 20:00 MYT
@@ -43,13 +43,16 @@ test("the tender is still open just before it closes", () => {
   assert.notEqual(typeof planSession("03-11-2026", "12:00", 2, rolloverFor("03-11-2026")! - 15 * 60_000 - 1), "string");
 });
 
-test("only a verified UM Workspace account signs in", () => {
-  const good = { aud: "id", email: "a@siswa.um.edu.my", email_verified: true, hd: "siswa.um.edu.my" };
-  const domains = "siswa.um.edu.my,um.edu.my";
-  assert.ok(claimsAllowed(good, "id", domains));
-  assert.ok(!claimsAllowed({ ...good, aud: "other" }, "id", domains));
-  assert.ok(!claimsAllowed({ ...good, email_verified: false }, "id", domains));
-  assert.ok(!claimsAllowed({ ...good, hd: undefined }, "id", domains)); // personal Google account
-  assert.ok(!claimsAllowed({ ...good, email: "a@gmail.com", hd: "gmail.com" }, "id", domains));
-  assert.ok(!claimsAllowed({ ...good, email: "a@evil.siswa.um.edu.my", hd: "evil.siswa.um.edu.my" }, "id", domains));
+test("friend codes are 3 to 20 letters or numbers, whatever the case", () => {
+  assert.equal(cleanCode(" ChenYu "), "chenyu");
+  for (const good of ["abc", "chenyu", "a1b2c3", "a".repeat(20)]) assert.ok(validCode(good), good);
+  for (const bad of ["", "ab", "a".repeat(21), "chen yu", "chen-yu", "a@b.my", "chen\n"]) assert.ok(!validCode(bad), bad);
+});
+
+test("a recovery key survives being retyped", () => {
+  const key = newKey();
+  assert.match(key, /^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+  assert.equal(cleanKey(key), key);
+  assert.equal(cleanKey(key.toLowerCase().replaceAll("-", " ")), key);
+  assert.equal(cleanKey("o1il-0000-0000-0000"), "0111-0000-0000-0000");
 });

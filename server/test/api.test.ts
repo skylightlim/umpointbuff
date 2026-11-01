@@ -30,8 +30,8 @@ async function waitFor(url: string) {
 before(async () => {
   const migrate = spawnSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", dir], { input: "y\n", encoding: "utf8" });
   assert.equal(migrate.status, 0, migrate.stderr);
-  worker = startWorker(PORT, ["--var", "DEV_LOGIN:1"]);
-  await waitFor(`${BASE}/auth/done`);
+  worker = startWorker(PORT, ["--var", "SIGNUPS_PER_HOUR:100000"]);
+  await waitFor(`${BASE}/state`);
 }, { timeout: 90_000 });
 
 after(() => {
@@ -41,9 +41,9 @@ after(() => {
 
 class User {
   token = "";
-  email: string;
-  constructor(email: string) {
-    this.email = email;
+  code: string;
+  constructor(code: string) {
+    this.code = code;
   }
   async post(path: string, body: unknown = {}) {
     const res = await fetch(BASE + path, { method: "POST", headers: { authorization: `Bearer ${this.token}` }, body: JSON.stringify(body) });
@@ -56,19 +56,23 @@ class User {
   }
 }
 
+const create = (code: string, name = code, base = BASE) =>
+  fetch(`${base}/auth/create`, { method: "POST", body: JSON.stringify({ code, name }) });
+
 let counter = 0;
 async function user(name: string): Promise<User> {
-  const email = `${name}${++counter}@siswa.um.edu.my`;
-  const u = new User(email);
-  const res = await fetch(`${BASE}/auth/dev`, { method: "POST", body: JSON.stringify({ email, name }) });
+  const code = `${name}x${++counter}`;
+  const u = new User(code);
+  const res = await create(code, name);
+  assert.equal(res.status, 200);
   u.token = ((await res.json()) as { token: string }).token;
   return u;
 }
 
 async function befriend(a: User, ...others: User[]) {
   for (const b of others) {
-    assert.equal((await a.post("/friends/add", { email: b.email })).status, 200);
-    assert.equal((await b.post("/friends/respond", { email: a.email, accept: true })).status, 200);
+    assert.equal((await a.post("/friends/add", { code: b.code })).status, 200);
+    assert.equal((await b.post("/friends/respond", { code: a.code, accept: true })).status, 200);
   }
 }
 
@@ -81,7 +85,7 @@ function tuesday(): string {
 }
 
 async function lobby(host: User, invited: User[], slots = 4, start = "17:00") {
-  const res = await host.post("/lobbies", { date: tuesday(), start, slots, court: "2", event: "Test", pax: 4, invite: invited.map((u) => u.email) });
+  const res = await host.post("/lobbies", { date: tuesday(), start, slots, court: "2", event: "Test", pax: 4, invite: invited.map((u) => u.code) });
   assert.equal(res.status, 200, JSON.stringify(res.body));
   const all = res.body.lobbies;
   return all[all.length - 1];
@@ -94,47 +98,94 @@ test("requests without a valid token are refused", async () => {
   assert.equal(res.status, 401);
 });
 
-test("the dev login doesn't exist unless switched on", async () => {
-  const plain = startWorker(PORT + 1, []);
+test("one network can only make so many accounts in an hour", async () => {
+  const limited = startWorker(PORT + 1, ["--var", "SIGNUPS_PER_HOUR:2"]);
+  const base = `http://127.0.0.1:${PORT + 1}`;
   try {
-    await waitFor(`${BASE.replace(String(PORT), String(PORT + 1))}/auth/done`);
-    const res = await fetch(`http://127.0.0.1:${PORT + 1}/auth/dev`, { method: "POST", body: JSON.stringify({ email: "x@siswa.um.edu.my", name: "x" }) });
-    assert.equal(res.status, 401);
+    await waitFor(`${base}/state`);
+    const code = () => `lim${++counter}`;
+    assert.equal((await create(code(), "a", base)).status, 200);
+    const taken = `lim${counter}`;
+    assert.equal((await create(taken, "a", base)).status, 409, "a taken code doesn't use up the allowance");
+    assert.equal((await create(code(), "b", base)).status, 200);
+    assert.equal((await create(code(), "c", base)).status, 429);
   } finally {
-    if (plain.pid) process.kill(-plain.pid);
+    if (limited.pid) process.kill(-limited.pid);
   }
 });
 
-test("a friend request needs the other person's yes, and only UM addresses can be added", async () => {
+test("Google's routes and signing out are gone", async () => {
+  assert.equal((await fetch(`${BASE}/auth/start?state=x`)).status, 401);
+  const a = await user("gone");
+  assert.equal((await a.post("/session/end")).status, 404);
+});
+
+test("a friend code is chosen once: taken and malformed ones are refused", async () => {
+  const a = await user("first");
+  assert.equal((await create(a.code)).status, 409);
+  assert.equal((await create(a.code.toUpperCase())).status, 409, "case doesn't make a second account");
+  for (const bad of ["ab", "with space", "a@siswa.um.edu.my", "x".repeat(21)]) {
+    assert.equal((await create(bad)).status, 400, bad);
+  }
+  const me = (await a.state()).me;
+  assert.equal(me.code, a.code);
+  assert.equal(me.name, "first");
+});
+
+test("a recovery key brings the same account back and signs the old phone out", async () => {
   const [a, b] = [await user("ann"), await user("ben")];
-  assert.equal((await a.post("/friends/add", { email: "someone@gmail.com" })).status, 400);
-  assert.equal((await a.post("/friends/add", { email: a.email })).status, 400);
-  await a.post("/friends/add", { email: b.email.toUpperCase() });
+  await befriend(a, b);
+  const { key } = (await a.state()).me;
+  assert.match(key, /^\w{4}-\w{4}-\w{4}-\w{4}$/);
+
+  const res = await fetch(`${BASE}/auth/restore`, { method: "POST", body: JSON.stringify({ key: key.toLowerCase() }) });
+  assert.equal(res.status, 200);
+  const moved = new User(a.code);
+  moved.token = ((await res.json()) as { token: string }).token;
+  const state = await moved.state();
+  assert.equal(state.me.code, a.code);
+  assert.equal(state.me.key, key);
+  assert.equal(state.friends[0].code, b.code, "friends come back too");
+  assert.equal((await fetch(`${BASE}/state`, { headers: { authorization: `Bearer ${a.token}` } })).status, 401);
+});
+
+test("a wrong recovery key is refused without touching the account", async () => {
+  const a = await user("ann");
+  for (const key of ["0000-0000-0000-0000", "", null]) {
+    assert.equal((await fetch(`${BASE}/auth/restore`, { method: "POST", body: JSON.stringify({ key }) })).status, 404);
+  }
+  assert.ok(await a.state());
+});
+
+test("nobody sees anyone else's recovery key", async () => {
+  const [host, f] = [await user("host"), await user("f")];
+  await befriend(host, f);
+  const l = await lobby(host, [f], 2);
+  await f.post(`/lobbies/${l.id}/respond`, { accept: true });
+  const { key } = (await host.state()).me;
+  assert.ok(!JSON.stringify(await f.state()).includes(key));
+});
+
+test("a friend request needs the other person's yes, and only real codes can be added", async () => {
+  const [a, b] = [await user("ann"), await user("ben")];
+  assert.equal((await a.post("/friends/add", { code: "nobodyhasthis" })).status, 404);
+  assert.equal((await a.post("/friends/add", { code: a.code })).status, 400);
+  await a.post("/friends/add", { code: b.code.toUpperCase() });
   assert.equal((await a.state()).friends[0].status, "outgoing");
   assert.equal((await b.state()).friends[0].status, "incoming");
   // Not friends yet, so ben can't be invited.
-  assert.equal((await a.post("/lobbies", { date: tuesday(), start: "12:00", slots: 2, court: "1", invite: [b.email] })).status, 400);
-  await b.post("/friends/respond", { email: a.email, accept: true });
+  assert.equal((await a.post("/lobbies", { date: tuesday(), start: "12:00", slots: 2, court: "1", invite: [b.code] })).status, 400);
+  await b.post("/friends/respond", { code: a.code, accept: true });
   assert.equal((await a.state()).friends[0].status, "accepted");
-  await b.post("/friends/remove", { email: a.email });
+  await b.post("/friends/remove", { code: a.code });
   assert.deepEqual((await a.state()).friends, []);
 });
 
 test("adding someone who already asked you accepts them", async () => {
   const [a, b] = [await user("ann"), await user("ben")];
-  await a.post("/friends/add", { email: b.email });
-  await b.post("/friends/add", { email: a.email });
+  await a.post("/friends/add", { code: b.code });
+  await b.post("/friends/add", { code: a.code });
   assert.equal((await a.state()).friends[0].status, "accepted");
-});
-
-test("you can add a friend before they've installed the app", async () => {
-  const a = await user("ann");
-  const email = `later${++counter}@siswa.um.edu.my`;
-  await a.post("/friends/add", { email });
-  const later = new User(email);
-  const res = await fetch(`${BASE}/auth/dev`, { method: "POST", body: JSON.stringify({ email, name: "later" }) });
-  later.token = ((await res.json()) as { token: string }).token;
-  assert.equal((await later.state()).friends[0].status, "incoming");
 });
 
 test("creating a session gives the host the first half hour and leaves the rest open", async () => {
@@ -142,7 +193,7 @@ test("creating a session gives the host the first half hour and leaves the rest 
   await befriend(host, f);
   const l = await lobby(host, [f], 4);
   assert.deepEqual(l.slots.map((s: any) => [s.start, s.end]), [["17:00", "17:30"], ["17:30", "18:00"], ["18:00", "18:30"], ["18:30", "19:00"]]);
-  assert.equal(l.slots[0].claimedBy, host.email);
+  assert.equal(l.slots[0].claimedBy, host.code);
   assert.ok(l.slots.slice(1).every((s: any) => s.claimedBy === null));
   assert.ok(find(await f.state(), l.id));
 });
@@ -158,14 +209,14 @@ test("friends accepting at the same instant get different, consecutive half hour
 
     const seen = find(await host.state(), l.id);
     const holders = seen.slots.map((s: any) => s.claimedBy);
-    assert.equal(holders[0], host.email);
+    assert.equal(holders[0], host.code);
     assert.ok(holders.every(Boolean), "every slot is filled");
     assert.equal(new Set(holders).size, 4, "nobody holds two");
     const responses = seen.invites.filter((i: any) => i.response !== "host");
     assert.equal(responses.filter((i: any) => i.response === "accepted").length, 3);
     assert.equal(responses.filter((i: any) => i.response === "player").length, 5);
     for (const i of responses) {
-      assert.equal(i.response === "accepted", holders.includes(i.email), "the response matches who holds a slot");
+      assert.equal(i.response === "accepted", holders.includes(i.code), "the response matches who holds a slot");
     }
   }
 });
@@ -175,7 +226,7 @@ test("tapping accept twice at once still takes only one half hour", async () => 
   await befriend(host, f);
   const l = await lobby(host, [f], 4);
   await Promise.all(Array.from({ length: 6 }, () => f.post(`/lobbies/${l.id}/respond`, { accept: true })));
-  const held = find(await f.state(), l.id).slots.filter((s: any) => s.claimedBy === f.email);
+  const held = find(await f.state(), l.id).slots.filter((s: any) => s.claimedBy === f.code);
   assert.equal(held.length, 1);
   assert.equal(held[0].idx, 1);
 });
@@ -190,12 +241,12 @@ test("giving up a half hour reopens it for the next person, without signing anyo
   await a.post(`/lobbies/${l.id}/withdraw`);
   let seen = find(await host.state(), l.id);
   assert.equal(seen.slots[1].claimedBy, null, "stays open rather than falling on c");
-  assert.equal(seen.slots[2].claimedBy, b.email);
-  assert.equal(seen.invites.find((i: any) => i.email === c.email).response, "player");
+  assert.equal(seen.slots[2].claimedBy, b.code);
+  assert.equal(seen.invites.find((i: any) => i.code === c.code).response, "player");
   await c.post(`/lobbies/${l.id}/respond`, { accept: true });
   seen = find(await host.state(), l.id);
-  assert.equal(seen.slots[1].claimedBy, c.email, "the earliest gap fills first, so the session stays unbroken");
-  assert.equal(seen.invites.find((i: any) => i.email === a.email).response, "declined");
+  assert.equal(seen.slots[1].claimedBy, c.code, "the earliest gap fills first, so the session stays unbroken");
+  assert.equal(seen.invites.find((i: any) => i.code === a.code).response, "declined");
 });
 
 test("someone holding a half hour has to give it up rather than decline", async () => {
@@ -204,7 +255,7 @@ test("someone holding a half hour has to give it up rather than decline", async 
   const l = await lobby(host, [a], 2);
   await a.post(`/lobbies/${l.id}/respond`, { accept: true });
   assert.equal((await a.post(`/lobbies/${l.id}/respond`, { accept: false })).status, 409);
-  assert.equal(find(await a.state(), l.id).slots[1].claimedBy, a.email);
+  assert.equal(find(await a.state(), l.id).slots[1].claimedBy, a.code);
 });
 
 test("declining doesn't stop you changing your mind while it's open", async () => {
@@ -212,9 +263,9 @@ test("declining doesn't stop you changing your mind while it's open", async () =
   await befriend(host, a);
   const l = await lobby(host, [a], 2);
   await a.post(`/lobbies/${l.id}/respond`, { accept: false });
-  assert.equal(find(await host.state(), l.id).invites.find((i: any) => i.email === a.email).response, "declined");
+  assert.equal(find(await host.state(), l.id).invites.find((i: any) => i.code === a.code).response, "declined");
   await a.post(`/lobbies/${l.id}/respond`, { accept: true });
-  assert.equal(find(await host.state(), l.id).slots[1].claimedBy, a.email);
+  assert.equal(find(await host.state(), l.id).slots[1].claimedBy, a.code);
 });
 
 test("strangers can't see or touch a session", async () => {
@@ -223,7 +274,7 @@ test("strangers can't see or touch a session", async () => {
   const l = await lobby(host, [a], 2);
   assert.equal(find(await stranger.state(), l.id), undefined);
   for (const action of ["respond", "withdraw", "cancel", "result", "invite"]) {
-    assert.equal((await stranger.post(`/lobbies/${l.id}/${action}`, { accept: true, emails: [a.email], idx: 0, result: "booked" })).status, 404, action);
+    assert.equal((await stranger.post(`/lobbies/${l.id}/${action}`, { accept: true, codes: [a.code], idx: 0, result: "booked" })).status, 404, action);
   }
 });
 
@@ -232,12 +283,12 @@ test("members can invite their own friends; people who haven't accepted can't", 
   await befriend(host, a);
   await befriend(a, b, c);
   const l = await lobby(host, [a], 3);
-  assert.equal((await a.post(`/lobbies/${l.id}/invite`, { emails: [b.email] })).status, 403);
+  assert.equal((await a.post(`/lobbies/${l.id}/invite`, { codes: [b.code] })).status, 403);
   await a.post(`/lobbies/${l.id}/respond`, { accept: true });
-  assert.equal((await a.post(`/lobbies/${l.id}/invite`, { emails: [b.email] })).status, 200);
+  assert.equal((await a.post(`/lobbies/${l.id}/invite`, { codes: [b.code] })).status, 200);
   assert.ok(find(await b.state(), l.id));
   // The host isn't friends with c, so the host can't pull c in.
-  assert.equal((await host.post(`/lobbies/${l.id}/invite`, { emails: [c.email] })).status, 400);
+  assert.equal((await host.post(`/lobbies/${l.id}/invite`, { codes: [c.code] })).status, 400);
 });
 
 test("re-inviting doesn't reset somebody's answer", async () => {
@@ -245,8 +296,8 @@ test("re-inviting doesn't reset somebody's answer", async () => {
   await befriend(host, a);
   const l = await lobby(host, [a], 2);
   await a.post(`/lobbies/${l.id}/respond`, { accept: true });
-  await host.post(`/lobbies/${l.id}/invite`, { emails: [a.email] });
-  assert.equal(find(await host.state(), l.id).invites.find((i: any) => i.email === a.email).response, "accepted");
+  await host.post(`/lobbies/${l.id}/invite`, { codes: [a.code] });
+  assert.equal(find(await host.state(), l.id).invites.find((i: any) => i.code === a.code).response, "accepted");
 });
 
 test("only the host calls it off, and then nobody can claim", async () => {
@@ -273,10 +324,4 @@ test("a phone can report only its own half hour, and only once", async () => {
   const slot = find(await host.state(), l.id).slots[1];
   assert.equal(slot.result, "failed");
   assert.equal(slot.message, "Court 2 was already taken");
-});
-
-test("signing out ends that session", async () => {
-  const a = await user("a");
-  await a.post("/session/end");
-  assert.equal((await fetch(`${BASE}/state`, { headers: { authorization: `Bearer ${a.token}` } })).status, 401);
 });

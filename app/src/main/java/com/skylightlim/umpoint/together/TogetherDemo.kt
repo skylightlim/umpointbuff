@@ -6,24 +6,24 @@ import com.skylightlim.umpoint.sniper.Umpoint
 /** Made-up people for checking the screen in a debug build. */
 object TogetherDemo {
     private const val DAY = 86_400_000L
-    private const val ME = "you@siswa.um.edu.my"
-    private const val AISYAH = "aisyah@siswa.um.edu.my"
-    private const val WEI = "weijie@siswa.um.edu.my"
-    private const val PRIYA = "priya@siswa.um.edu.my"
-    private const val DAN = "daniel@siswa.um.edu.my"
+    private const val ME = "you"
+    private const val AISYAH = "aisyah"
+    private const val WEI = "weijie"
+    private const val PRIYA = "priya"
+    private const val DAN = "daniel"
 
     private fun slot(idx: Int, start: String, end: String, by: String?, name: String?) = Slot(idx, start, end, by, name, null, null)
 
     fun state(now: Long): TogetherState {
         val fireAt = nextRollover(now)
         return TogetherState(
-            me = Person(ME, "You"),
+            me = Person(ME, "You", "7KQ2-M9XD-4TRW-H1PV"),
             friends = listOf(
                 Friend(AISYAH, "Aisyah", FriendStatus.ACCEPTED),
                 Friend(WEI, "Wei Jie", FriendStatus.ACCEPTED),
                 Friend(PRIYA, "Priya", FriendStatus.ACCEPTED),
                 Friend(DAN, "Daniel", FriendStatus.INCOMING),
-                Friend("hafiz@siswa.um.edu.my", "hafiz", FriendStatus.OUTGOING),
+                Friend("hafiz", "hafiz", FriendStatus.OUTGOING),
             ),
             lobbies = listOf(
                 Lobby(

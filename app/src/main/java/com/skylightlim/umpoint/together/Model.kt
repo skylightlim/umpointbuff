@@ -3,11 +3,12 @@ package com.skylightlim.umpoint.together
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class Person(val email: String, val name: String)
+/** The signed-in user. [key] brings the account back on another phone. */
+data class Person(val code: String, val name: String, val key: String)
 
 enum class FriendStatus { ACCEPTED, INCOMING, OUTGOING }
 
-data class Friend(val email: String, val name: String, val status: FriendStatus)
+data class Friend(val code: String, val name: String, val status: FriendStatus)
 
 /** One half hour of a session. Whoever holds it books it from their own phone at 00:00. */
 data class Slot(
@@ -20,7 +21,7 @@ data class Slot(
     val message: String?,
 )
 
-data class Invite(val email: String, val name: String, val response: String)
+data class Invite(val code: String, val name: String, val response: String)
 
 data class Lobby(
     val id: String,
@@ -40,8 +41,8 @@ data class Lobby(
     val start get() = slots.first().start
     val end get() = slots.last().end
     val openSlots get() = slots.count { it.claimedBy == null }
-    fun slotOf(email: String) = slots.firstOrNull { it.claimedBy == email }
-    fun responseOf(email: String) = invites.firstOrNull { it.email == email }?.response
+    fun slotOf(code: String) = slots.firstOrNull { it.claimedBy == code }
+    fun responseOf(code: String) = invites.firstOrNull { it.code == code }?.response
     fun closedAt(now: Long) = cancelled || now >= closesAt
 }
 
@@ -57,10 +58,10 @@ private inline fun <T> JSONArray.mapObjects(block: (JSONObject) -> T): List<T> =
 fun togetherStateFromJson(o: JSONObject): TogetherState {
     val me = o.getJSONObject("me")
     return TogetherState(
-        me = Person(me.getString("email"), me.getString("name")),
+        me = Person(me.getString("code"), me.getString("name"), me.getString("key")),
         friends = o.getJSONArray("friends").mapObjects {
             Friend(
-                email = it.getString("email"),
+                code = it.getString("code"),
                 name = it.getString("name"),
                 status = when (it.getString("status")) {
                     "accepted" -> FriendStatus.ACCEPTED
@@ -93,7 +94,7 @@ fun togetherStateFromJson(o: JSONObject): TogetherState {
                     )
                 },
                 invites = l.getJSONArray("invites").mapObjects {
-                    Invite(it.getString("email"), it.getString("name"), it.getString("response"))
+                    Invite(it.getString("code"), it.getString("name"), it.getString("response"))
                 },
             )
         },

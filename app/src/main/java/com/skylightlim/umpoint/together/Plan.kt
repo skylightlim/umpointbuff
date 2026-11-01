@@ -28,11 +28,11 @@ const val CLOSE_BEFORE_MS = 15 * 60_000L
 /** What the app bar's badge counts: answers only this user can give. */
 fun TogetherState.waitingCount(now: Long): Int =
     friends.count { it.status == FriendStatus.INCOMING } +
-        lobbies.count { it.responseOf(me.email) == "pending" && !it.closedAt(now) }
+        lobbies.count { it.responseOf(me.code) == "pending" && !it.closedAt(now) }
 
 /** Pure, so every path between the server and the sniper can be tested without a phone. */
 fun planSync(state: TogetherState, tasks: List<Task>, now: Long): List<Step> {
-    val me = state.me.email
+    val me = state.me.code
     val byId = tasks.associateBy { it.id }
     val steps = mutableListOf<Step>()
     val held = mutableSetOf<String>()

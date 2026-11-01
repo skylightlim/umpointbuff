@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Friends and open tenders for UMPoint Badminton. Holds no UMPoint session and books nothing.",
   "scripts": {
-    "dev": "wrangler dev --local --var DEV_LOGIN:1",
+    "dev": "wrangler dev --local --var SIGNUPS_PER_HOUR:1000",
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",

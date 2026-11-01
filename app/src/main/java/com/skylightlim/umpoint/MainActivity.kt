@@ -45,11 +45,6 @@ class MainActivity : ComponentActivity() {
                     together.setOpen(true)
                 }
             }
-            // A local worker's sign-in, for trying Play together without Google.
-            intent.getStringExtra("umpoint_together_dev")?.let { email ->
-                together.devSignIn(email)
-                together.setOpen(true)
-            }
         }
     }
 }

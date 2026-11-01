@@ -66,13 +66,13 @@ async function accessToken(env: PushEnv, account: ServiceAccount): Promise<strin
  * Tells phones that something changed. Best effort: a phone that misses this catches up on its next
  * sync, so a failure here must never fail the request that caused it.
  */
-export async function sendPush(env: PushEnv, emails: string[], push: Push): Promise<void> {
-  if (!env.FIREBASE_SERVICE_ACCOUNT || emails.length === 0) return;
+export async function sendPush(env: PushEnv, codes: string[], push: Push): Promise<void> {
+  if (!env.FIREBASE_SERVICE_ACCOUNT || codes.length === 0) return;
   try {
     const account = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT) as ServiceAccount;
-    const marks = emails.map(() => "?").join(",");
-    const { results } = await env.DB.prepare(`SELECT token FROM devices WHERE email IN (${marks})`)
-      .bind(...emails).all<{ token: string }>();
+    const marks = codes.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(`SELECT token FROM devices WHERE code IN (${marks})`)
+      .bind(...codes).all<{ token: string }>();
     if (results.length === 0) return;
     const bearer = await accessToken(env, account);
     await Promise.all(results.map(async ({ token }) => {

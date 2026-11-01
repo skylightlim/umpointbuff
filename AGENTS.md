@@ -33,7 +33,7 @@ Never read the screen (`uiautomator dump`, screenshots) while a sign-in page may
 - `data/`: repository, cache and parsing.
 - `screens/` and `ui/`: Compose. See `DESIGN.md`.
 - `together/`: friends and open tenders (Play together). `Plan.kt` is the pure core that turns the server's state into armed snipes.
-- `server/`: its Cloudflare Worker and D1 database. `server/setup.sh` creates the accounts and deploys it.
+- `server/`: its Cloudflare Worker and D1 database. `server/setup.sh` creates the accounts and deploys it. `server/keys.sh [code]` shows recovery keys, so never run it where its output gets logged.
 
 Three tabs (Courts, Sniper, Bookings) switch by state in `ui/AppRoot.kt`, with Settings behind the avatar. There is no navigation library: nothing deep-links.
 

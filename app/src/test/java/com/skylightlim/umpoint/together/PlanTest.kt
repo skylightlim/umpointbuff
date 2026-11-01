@@ -7,8 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlanTest {
-    private val me = "me@siswa.um.edu.my"
-    private val other = "other@siswa.um.edu.my"
+    private val me = "me"
+    private val other = "other"
     private val fireAt = 1_000_000_000L
     private val closesAt = fireAt - 900_000
     private val before = closesAt - 60_000
@@ -21,7 +21,7 @@ class PlanTest {
         fireAt = fireAt, closesAt = closesAt, status = status, slots = slots.toList(), invites = emptyList(),
     )
 
-    private fun state(vararg lobbies: Lobby) = TogetherState(Person(me, "Me"), emptyList(), lobbies.toList())
+    private fun state(vararg lobbies: Lobby) = TogetherState(Person(me, "Me", "KEY"), emptyList(), lobbies.toList())
 
     private fun task(id: String, status: String = "armed", date: String = "03-11-2026", message: String? = null) = Task(
         id = id, date = date, start = "17:30", end = "18:00", court = "2", anyCourt = false, event = "Practice", pax = 4,
@@ -127,7 +127,7 @@ class PlanTest {
         val closed = pending.copy(id = "closed", status = "cancelled")
         val answered = pending.copy(id = "answered", invites = listOf(Invite(me, "Me", "declined")))
         val friends = listOf(Friend("a", "A", FriendStatus.INCOMING), Friend("b", "B", FriendStatus.OUTGOING), Friend("c", "C", FriendStatus.ACCEPTED))
-        val s = TogetherState(Person(me, "Me"), friends, listOf(pending, closed, answered))
+        val s = TogetherState(Person(me, "Me", "KEY"), friends, listOf(pending, closed, answered))
         assertEquals(2, s.waitingCount(before))
         assertEquals(1, s.waitingCount(closesAt))
     }

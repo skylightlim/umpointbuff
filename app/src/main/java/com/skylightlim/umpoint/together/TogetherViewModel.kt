@@ -3,7 +3,6 @@ package com.skylightlim.umpoint.together
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.skylightlim.umpoint.BuildConfig
 import com.skylightlim.umpoint.data.weekOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -18,8 +17,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 class TogetherViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application
@@ -35,9 +32,6 @@ class TogetherViewModel(application: Application) : AndroidViewModel(application
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
-
-    private val _signingIn = MutableStateFlow(false)
-    val signingIn: StateFlow<Boolean> = _signingIn.asStateFlow()
 
     private val _notes = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val notes: SharedFlow<String> = _notes.asSharedFlow()
@@ -74,41 +68,16 @@ class TogetherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun startSignIn() {
-        _signingIn.value = true
-    }
+    fun createAccount(code: String, name: String) = openAccount { Together.create(app, code, name) }
 
-    fun cancelSignIn() {
-        _signingIn.value = false
-    }
+    fun restore(key: String) = openAccount { Together.restore(app, key) }
 
-    fun finishSignIn(token: String) {
-        _signingIn.value = false
-        act { Together.finishSignIn(app, token).also { _signedIn.value = true } }
-    }
-
-    fun signOut() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) { Together.signOut(app) }
-            _signedIn.value = false
-            _state.value = null
-        }
-    }
-
-    /** Debug builds only: a local worker, signed in by email without Google. */
-    fun devSignIn(email: String) {
-        if (!BuildConfig.DEBUG) return
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val conn = URL("${BuildConfig.TOGETHER_URL}/auth/dev").openConnection() as HttpURLConnection
-                    conn.requestMethod = "POST"
-                    conn.doOutput = true
-                    val body = JSONObject().put("email", email).put("name", email.substringBefore('@'))
-                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
-                    JSONObject(conn.inputStream.bufferedReader().readText()).getString("token")
-                }.onSuccess { finishSignIn(it) }.onFailure { _notes.tryEmit("Dev sign-in failed: ${it.message}") }
-            }
+    /** If only the sync after it fails, the account still exists, so this phone counts as signed in. */
+    private fun openAccount(block: () -> TogetherState) = act {
+        try {
+            block()
+        } finally {
+            _signedIn.value = Together.signedIn(app)
         }
     }
 
@@ -118,24 +87,24 @@ class TogetherViewModel(application: Application) : AndroidViewModel(application
         _state.value = TogetherDemo.state(System.currentTimeMillis())
     }
 
-    fun addFriend(email: String) = act { Together.send(app, "/friends/add", JSONObject().put("email", email)) }
+    fun addFriend(code: String) = act { Together.send(app, "/friends/add", JSONObject().put("code", code)) }
 
-    fun answerFriend(email: String, accept: Boolean) =
-        act { Together.send(app, "/friends/respond", JSONObject().put("email", email).put("accept", accept)) }
+    fun answerFriend(code: String, accept: Boolean) =
+        act { Together.send(app, "/friends/respond", JSONObject().put("code", code).put("accept", accept)) }
 
-    fun removeFriend(email: String) = act { Together.send(app, "/friends/remove", JSONObject().put("email", email)) }
+    fun removeFriend(code: String) = act { Together.send(app, "/friends/remove", JSONObject().put("code", code)) }
 
     fun create(date: String, start: String, slots: Int, court: String, event: String, pax: Int, invite: Collection<String>) = act {
         Together.send(
             app,
             "/lobbies",
             JSONObject().put("date", date).put("start", start).put("slots", slots).put("court", court)
-                .put("event", event).put("pax", pax).put("invite", Together.emails(invite)),
+                .put("event", event).put("pax", pax).put("invite", Together.codes(invite)),
         )
     }
 
     fun inviteMore(lobby: Lobby, invite: Collection<String>) =
-        act { Together.send(app, "/lobbies/${lobby.id}/invite", JSONObject().put("emails", Together.emails(invite))) }
+        act { Together.send(app, "/lobbies/${lobby.id}/invite", JSONObject().put("codes", Together.codes(invite))) }
 
     fun accept(lobby: Lobby) = act { Together.accept(app, lobby, ::weekOf) }
 
