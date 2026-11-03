@@ -85,6 +85,7 @@ Minus also bundles a `TopSheet`, swipe actions and tutorial hints worth reading 
 
 - Demo mode shows over the lock screen, so a locked phone is fine. Nothing else about the phone needs changing.
 - Grant notifications first so no dialog covers the app: `pm grant <package> android.permission.POST_NOTIFICATIONS`.
+- Right after `adb install -r`, a demo launch can come up on the real UMPoint sign-in page instead of the demo (seen twice on the emulator, 4 Nov 2026). On a real phone that makes the next screenshot a sign-in page, so check the top activity first. `pm clear` on the debug package fixes it.
 - Tap positions on a 1080×2400 screen in demo mode:
 
 | Control | x, y |
