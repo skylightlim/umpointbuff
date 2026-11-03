@@ -97,7 +97,7 @@ import com.skylightlim.umpoint.ui.components.segmentShape
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 
 private const val SIGN_IN_FIRST = "Sign in to UMPoint first, so your phone can book at 00:00."
-private val LENGTHS = listOf(2 to "1 h", 3 to "1.5 h", 4 to "2 h", 5 to "2.5 h", 6 to "3 h")
+private val LENGTHS = listOf(2 to "1 hr", 3 to "1½ hr", 4 to "2 hr", 5 to "2½ hr", 6 to "3 hr")
 private const val CODE_MIN = 3
 private const val CODE_MAX = 20
 private val STARTS = (18 until 38).map { Umpoint.hhmm(it * 30) }
@@ -747,6 +747,7 @@ private fun NewSessionSheet(
                             CourtIds.ALL.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
                             else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                         },
+                        contentPadding = PaddingValues(horizontal = 2.dp),
                         colors = ToggleButtonDefaults.colors(containerColor = colors.surfaceBright),
                     ) { Text("Court $id", maxLines = 1) }
                 }

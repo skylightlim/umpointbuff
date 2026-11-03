@@ -60,8 +60,8 @@ Material's guidance is one or two per product. These are the two, and full shape
 
 ## Screens
 
-- **Courts:** date, then time, then court, one step at a time. One date row covers both weeks, so there is no week switch, and the date decides whether the button says Book or Arm. The strip starts with the Passed toggle, where the past is: passed days slide in right next to it. Four pips under each time show which courts are free, in court order, filled or hollow, and a time with something more important to say shows a word instead (Armed, Yours, Full). System Back steps back.
-- **Sniper:** problems first, only when something is wrong. Then the countdown and next week's two slots as shuttles, touching as one group. The digits exactly fill the card's width, and the headline turns amber as soon as a snipe is armed, so the state reads from across the room. Then the rules, grouped by where they come from so the source needs no decoding, and collapsed history. There is no readiness checklist and no test-run button.
+- **Courts:** date, then time, then court, one step at a time. One date row covers both weeks, so there is no week switch, and the date decides whether the button says Book or Arm. The strip starts with the Passed toggle, where the past is: passed days slide in right next to it. Mid-week the days don't all fit, so the strip fades out at whichever end has more to scroll to (`fadingSides`) instead of clipping a tile. Four pips under each time show which courts are free, in court order, filled or hollow, and a time with something more important to say shows a word instead (Armed, Yours, Full). System Back steps back.
+- **Sniper:** problems first, only when something is wrong. Then the countdown and next week's two slots as shuttles, touching as one group. The digits exactly fill the card's width, and the headline turns amber as soon as a snipe is armed, so the state reads from across the room. Then the rules and the history, each collapsed to one row until tapped (owner's choice, 4 Nov 2026). Open, the rules are grouped by where they come from so the source needs no decoding. There is no readiness checklist and no test-run button.
 - **Bookings:** grouped by week, calm. Cancelling opens UMPoint's own page, so its button stays quiet: the real decision is made there.
 - **Settings:** a secondary page behind the avatar.
 - **Play together:** a secondary page behind the people icon beside the avatar, whose badge counts answers waiting. Invites first, then sessions, then friends. Before an account exists it shows a form for a name and a permanent friend code, or a recovery key. Each half hour names its holder and carries a word: Armed for your own, Taken for someone else's, since this phone can't know theirs is armed.
@@ -70,7 +70,7 @@ A shuttle's shape shows its state: circle and dashed when empty, cookie when arm
 
 ## Components
 
-`FloatingDock` (a floating pill of tabs, whose selected blob has two edges on separate springs) with `NavigationRail` from 600 dp, a one-row `TopAppBar` with the title and avatar side by side, `ToggleButton`, connected button groups for duration, `shapes = ButtonDefaults.shapes()` on buttons, `LoadingIndicator`, and the expressive pull-to-refresh indicator.
+`FloatingDock` (a floating pill of tabs, whose selected blob has two edges on separate springs) with `NavigationRail` from 600 dp, a one-row `TopAppBar` with the title beside the people icon and avatar (the owner found the two-row flexible bar's title sat too low), `ToggleButton`, connected button groups for duration, `shapes = ButtonDefaults.shapes()` on buttons, `LoadingIndicator`, and the expressive pull-to-refresh indicator.
 
 In the court step the dock slides away and the big Book or Arm button floats in its place, so the main action is always in reach. Settings shrinks and rounds under the predictive back gesture.
 

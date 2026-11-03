@@ -140,6 +140,41 @@ fun Modifier.fadingEdges(state: ScrollableState, bottom: Dp = LocalBottomClearan
         }
 }
 
+private val SIDE_FADE = 40.dp
+
+/** A sideways strip fades out at whichever end has more to scroll to, so a tile at the edge reads as "more this way", not cut off. */
+@Composable
+fun Modifier.fadingSides(state: ScrollableState): Modifier {
+    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val start by animateFloatAsState(if (state.canScrollBackward) 1f else 0f, effects, label = "start")
+    val end by animateFloatAsState(if (state.canScrollForward) 1f else 0f, effects, label = "end")
+    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val fade = SIDE_FADE.toPx()
+            if (start > 0f) {
+                drawRect(
+                    Brush.horizontalGradient(0f to Color.Black.copy(alpha = 1f - start), 1f to Color.Black, endX = fade),
+                    size = Size(fade, size.height),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+            if (end > 0f) {
+                drawRect(
+                    Brush.horizontalGradient(
+                        0f to Color.Black,
+                        1f to Color.Black.copy(alpha = 1f - end),
+                        startX = size.width - fade,
+                        endX = size.width,
+                    ),
+                    topLeft = Offset(size.width - fade, 0f),
+                    size = Size(fade, size.height),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
+}
+
 /** A shape partway through a morph between two Material polygons. */
 private class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {

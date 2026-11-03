@@ -81,7 +81,6 @@ import com.skylightlim.umpoint.ui.components.ProblemCard
 import com.skylightlim.umpoint.ui.components.RefreshBox
 import com.skylightlim.umpoint.ui.components.RollingText
 import com.skylightlim.umpoint.ui.components.ScreenFrame
-import com.skylightlim.umpoint.ui.components.SectionLabel
 import com.skylightlim.umpoint.ui.components.SegmentGap
 import com.skylightlim.umpoint.ui.components.SegmentInner
 import com.skylightlim.umpoint.ui.components.SegmentOuter
@@ -163,6 +162,7 @@ fun SniperScreen(
     var openTask by remember { mutableStateOf<Task?>(null) }
     var confirmCancel by remember { mutableStateOf<Task?>(null) }
     var historyOpen by rememberSaveable { mutableStateOf(false) }
+    var rulesOpen by rememberSaveable { mutableStateOf(false) }
 
     val chambers = buildList {
         fun inWeek(date: String) = weekOf(date) == rollover
@@ -257,7 +257,7 @@ fun SniperScreen(
                     chambers = chambers,
                 )
 
-                RulesSection()
+                RulesSection(open = rulesOpen, onToggle = { rulesOpen = !rulesOpen })
 
                 if (finished.isNotEmpty()) {
                     HistorySection(
@@ -464,24 +464,58 @@ private fun ChamberCard(chamber: Chamber, shape: Shape, order: Int, modifier: Mo
     }
 }
 
-/** Grouped by where each rule comes from, so its source needs no decoding. */
+/** A group that shows only its title row until tapped. `rows` is how many pieces follow it when open. */
 @Composable
-private fun RulesSection() {
+private fun Disclosure(
+    title: String,
+    open: Boolean,
+    onToggle: () -> Unit,
+    rows: Int,
+    content: @Composable (count: Int) -> Unit,
+) {
+    val motion = MaterialTheme.motionScheme
+    val turn by animateFloatAsState(if (open) 180f else 0f, motion.defaultSpatialSpec(), label = "turn")
+    val count = if (open) rows + 1 else 1
+    Column(
+        Modifier.fillMaxWidth().animateContentSize(motion.defaultSpatialSpec()),
+        verticalArrangement = Arrangement.spacedBy(SegmentGap),
+    ) {
+        Surface(shape = segmentShape(0, count), color = MaterialTheme.colorScheme.surfaceBright) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .clickable(role = Role.Button, onClickLabel = if (open) "Hide" else "Show", onClick = onToggle)
+                    .padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
+                Icon(Icons.Rounded.ExpandMore, contentDescription = null, modifier = Modifier.graphicsLayer { rotationZ = turn })
+            }
+        }
+        if (open) content(count)
+    }
+}
+
+/** Collapsed until asked for. Grouped by where each rule comes from, so its source needs no decoding. */
+@Composable
+private fun RulesSection(open: Boolean, onToggle: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val sources = RuleSource.entries
-    Column {
-        SectionLabel("Booking rules")
-        Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
-            sources.forEachIndexed { index, source ->
-                Surface(shape = segmentShape(index, sources.size), color = colors.surfaceBright, modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(source.label, style = MaterialTheme.typography.labelLargeEmphasized, color = colors.onSurfaceVariant)
-                        RULES.filter { it.source == source }.forEach { rule ->
-                            Text(rule.text, style = MaterialTheme.typography.bodyMedium)
-                        }
+    Disclosure("Booking rules", open, onToggle, sources.size) { count ->
+        sources.forEachIndexed { index, source ->
+            Surface(
+                shape = segmentShape(index + 1, count),
+                color = colors.surfaceBright,
+                modifier = Modifier.fillMaxWidth().bounceIn(index),
+            ) {
+                Column(
+                    Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(source.label, style = MaterialTheme.typography.labelLargeEmphasized, color = colors.onSurfaceVariant)
+                    RULES.filter { it.source == source }.forEach { rule ->
+                        Text(rule.text, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -496,44 +530,18 @@ private fun HistorySection(
     onToggle: () -> Unit,
     onOpen: (Task) -> Unit,
 ) {
-    val colors = MaterialTheme.colorScheme
-    val motion = MaterialTheme.motionScheme
-    val turn by animateFloatAsState(if (open) 180f else 0f, motion.defaultSpatialSpec(), label = "turn")
-    val count = if (open) finished.size + 1 else 1
-    Column(
-        Modifier.fillMaxWidth().animateContentSize(motion.defaultSpatialSpec()),
-        verticalArrangement = Arrangement.spacedBy(SegmentGap),
-    ) {
-        Surface(shape = segmentShape(0, count), color = colors.surfaceBright) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 64.dp)
-                    .clickable(role = Role.Button, onClick = onToggle)
-                    .padding(horizontal = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Snipe history · ${finished.size}", style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
-                Icon(
-                    Icons.Rounded.ExpandMore,
-                    contentDescription = if (open) "Hide history" else "Show history",
-                    modifier = Modifier.graphicsLayer { rotationZ = turn },
-                )
-            }
-        }
-        if (open) {
-            finished.forEachIndexed { index, task ->
-                val look = taskLook(task.status)
-                SegmentRow(
-                    shape = segmentShape(index + 1, count),
-                    title = "${dayLabel(task.date)} · ${task.start}–${task.end}",
-                    subtitle = "${if (task.dryRun) "Dry run" else "Court ${task.bookedCourt ?: task.court}"} · ${look.label}",
-                    leading = { ShuttleBadge(if (task.dryRun) ShuttleState.TEST else look.shuttle, 52.dp) },
-                    chevron = true,
-                    onClick = { onOpen(task) },
-                    modifier = Modifier.bounceIn(index),
-                )
-            }
+    Disclosure("Snipe history · ${finished.size}", open, onToggle, finished.size) { count ->
+        finished.forEachIndexed { index, task ->
+            val look = taskLook(task.status)
+            SegmentRow(
+                shape = segmentShape(index + 1, count),
+                title = "${dayLabel(task.date)} · ${task.start}–${task.end}",
+                subtitle = "${if (task.dryRun) "Dry run" else "Court ${task.bookedCourt ?: task.court}"} · ${look.label}",
+                leading = { ShuttleBadge(if (task.dryRun) ShuttleState.TEST else look.shuttle, 52.dp) },
+                chevron = true,
+                onClick = { onOpen(task) },
+                modifier = Modifier.bounceIn(index),
+            )
         }
     }
 }

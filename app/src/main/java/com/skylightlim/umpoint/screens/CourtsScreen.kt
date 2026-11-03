@@ -120,6 +120,7 @@ import com.skylightlim.umpoint.ui.components.ScreenFrame
 import com.skylightlim.umpoint.ui.components.SegmentGap
 import com.skylightlim.umpoint.ui.components.SegmentRow
 import com.skylightlim.umpoint.ui.components.fadingEdges
+import com.skylightlim.umpoint.ui.components.fadingSides
 import com.skylightlim.umpoint.ui.components.segmentShape
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
 import com.skylightlim.umpoint.ui.theme.pageSpring
@@ -444,6 +445,7 @@ private fun DateStrip(
             .coerceIn(50.dp, 84.dp)
         LazyRow(
             state = list,
+            modifier = Modifier.fadingSides(list),
             contentPadding = PaddingValues(horizontal = STRIP_PADDING),
             horizontalArrangement = Arrangement.spacedBy(STRIP_GAP),
             verticalAlignment = Alignment.CenterVertically,
