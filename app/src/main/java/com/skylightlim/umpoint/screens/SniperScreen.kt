@@ -1,5 +1,6 @@
 package com.skylightlim.umpoint.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
@@ -7,8 +8,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,9 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,11 +46,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
@@ -74,10 +83,13 @@ import com.skylightlim.umpoint.ui.components.RollingText
 import com.skylightlim.umpoint.ui.components.ScreenFrame
 import com.skylightlim.umpoint.ui.components.SectionLabel
 import com.skylightlim.umpoint.ui.components.SegmentGap
+import com.skylightlim.umpoint.ui.components.SegmentInner
+import com.skylightlim.umpoint.ui.components.SegmentOuter
 import com.skylightlim.umpoint.ui.components.SegmentRow
 import com.skylightlim.umpoint.ui.components.ShuttleBadge
 import com.skylightlim.umpoint.ui.components.ShuttleState
 import com.skylightlim.umpoint.ui.components.bounceIn
+import com.skylightlim.umpoint.ui.components.fadingEdges
 import com.skylightlim.umpoint.ui.components.segmentShape
 import com.skylightlim.umpoint.ui.components.springPress
 import com.skylightlim.umpoint.ui.theme.LocalCourtColors
@@ -88,10 +100,10 @@ private const val DAY_MS = 86_400_000L
 private val FIRE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
 private enum class RuleSource(val label: String) {
-    TERMS("Terms"),
-    PAGE("Page"),
-    SEEN("Seen"),
-    NOTE("Note"),
+    TERMS("Pusat Sukan’s terms"),
+    PAGE("UMPoint’s booking page"),
+    SEEN("Seen on the site"),
+    NOTE("This app’s own limit"),
 }
 
 private data class Rule(val text: String, val source: RuleSource)
@@ -202,17 +214,17 @@ fun SniperScreen(
                     state = ShuttleState.EMPTY,
                     day = "Tue – Fri",
                     time = "Pick a slot",
-                    detail = "Fires at 00:00:00",
+                    detail = null,
                     status = "Empty",
                     onClick = { onPickSlot(Umpoint.mytDate(rollover + DAY_MS)) },
                 ),
             )
         }
     }
-    val used = chambers.count { it.state == ShuttleState.BOOKED || it.state == ShuttleState.ARMED }
     val issues = problems(vm, session, setup, ringing)
 
     ScreenFrame("Sniper", session, onOpenSettings) {
+        val scroll = rememberScrollState()
         RefreshBox(
             refreshing = bookings.refreshing,
             onRefresh = {
@@ -225,19 +237,23 @@ fun SniperScreen(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .fadingEdges(scroll)
+                    .verticalScroll(scroll)
                     .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = LocalBottomClearance.current),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                issues.forEachIndexed { index, issue ->
-                    ProblemCard(issue.title, issue.text, issue.fix, Modifier.bounceIn(index))
+                if (issues.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        issues.forEachIndexed { index, issue ->
+                            ProblemCard(issue.title, issue.text, issue.fix, Modifier.bounceIn(index))
+                        }
+                    }
                 }
 
                 CountdownHero(
                     rollover = rollover,
                     now = now,
                     running = running,
-                    used = used,
                     chambers = chambers,
                 )
 
@@ -295,86 +311,108 @@ fun SniperScreen(
     }
 }
 
-/** The page's headline: the live countdown, and next week's two slots as a tube of shuttles. */
+/**
+ * The page's headline and next week's two slots, as one group of touching pieces. It turns amber as
+ * soon as a snipe is armed, so the page's state reads from across the room.
+ */
 @Composable
 private fun CountdownHero(
     rollover: Long,
     now: Long,
     running: Boolean,
-    used: Int,
     chambers: List<Chamber>,
 ) {
     val colors = MaterialTheme.colorScheme
-    val parts = countdown(rollover - now).split(" ")
-    val days = parts.takeIf { it.size == 2 }?.first()?.removeSuffix("d")?.toIntOrNull()
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = colors.primaryContainer,
-        modifier = Modifier.fillMaxWidth().bounceIn(0),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (running) "The sniper is awake" else "Next week opens in",
-                        style = MaterialTheme.typography.titleMediumEmphasized,
-                        color = colors.onPrimaryContainer,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Surface(shape = CircleShape, color = colors.surfaceBright) {
-                        Text(
-                            "$used of 2 used",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.onSurface,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                // The digits are sized to the card so they always fit on one line, at any text size.
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val size = (maxWidth.value / 5.4f).coerceAtMost(60f)
-                    val density = LocalDensity.current
-                    CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
-                        Column {
-                            if (days != null) {
-                                Text(
-                                    if (days == 1) "1 day" else "$days days",
-                                    style = MaterialTheme.typography.displaySmall.copy(fontSize = (size * 0.55f).sp, lineHeight = (size * 0.8f).sp),
-                                    color = colors.onPrimaryContainer,
-                                )
-                            }
-                            RollingText(
-                                parts.last(),
-                                MaterialTheme.typography.displayMedium.copy(fontSize = size.sp, lineHeight = (size * 1.2f).sp),
-                                colors.onPrimaryContainer,
-                            )
-                        }
-                    }
-                }
+    val cc = LocalCourtColors.current
+    val effects = MaterialTheme.motionScheme.slowEffectsSpec<Color>()
+    val armed = chambers.any { it.state == ShuttleState.ARMED }
+    val fill by animateColorAsState(if (armed) cc.armedContainer else colors.primaryContainer, effects, label = "heroFill")
+    val ink by animateColorAsState(if (armed) cc.onArmedContainer else colors.onPrimaryContainer, effects, label = "heroInk")
+    val rows = chambers.chunked(2)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+        Surface(
+            shape = RoundedCornerShape(topStart = SegmentOuter, topEnd = SegmentOuter, bottomStart = SegmentInner, bottomEnd = SegmentInner),
+            color = fill,
+            modifier = Modifier.fillMaxWidth().bounceIn(0),
+        ) {
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 20.dp)) {
                 Text(
-                    "${weekRange(rollover)} · opens ${shortDay(rollover)}, 00:00:00 MYT",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onPrimaryContainer,
-                    modifier = Modifier.padding(top = 4.dp),
+                    when {
+                        running -> "The sniper is awake"
+                        armed -> "Armed. Fires in"
+                        else -> "Next week opens in"
+                    },
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    color = ink,
+                )
+                Countdown(rollover - now, ink, Modifier.padding(vertical = 2.dp))
+                Text(
+                    when {
+                        armed && !running -> "Wakes at 23:50 · fires ${shortDay(rollover)}, 00:00:00 MYT"
+                        else -> "${weekRange(rollover)} · opens ${shortDay(rollover)}, 00:00:00 MYT"
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(lineBreak = LineBreak.Heading),
+                    color = ink,
                 )
             }
-            Spacer(Modifier.height(12.dp))
-            chambers.chunked(2).forEachIndexed { rowIndex, row ->
-                if (rowIndex > 0) Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEachIndexed { index, chamber ->
-                        ChamberCard(chamber, order = rowIndex * 2 + index + 1, modifier = Modifier.weight(1f))
-                    }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+        }
+        rows.forEachIndexed { rowIndex, row ->
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(SegmentGap),
+            ) {
+                row.forEachIndexed { index, chamber ->
+                    val bottom = rowIndex == rows.lastIndex
+                    ChamberCard(
+                        chamber = chamber,
+                        shape = RoundedCornerShape(
+                            topStart = SegmentInner,
+                            topEnd = SegmentInner,
+                            bottomStart = if (bottom && index == 0) SegmentOuter else SegmentInner,
+                            bottomEnd = if (bottom && index == row.lastIndex) SegmentOuter else SegmentInner,
+                        ),
+                        order = rowIndex * 2 + index + 1,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
                 }
             }
         }
     }
 }
 
+/** The digits are sized to exactly fill the width they're given, whatever the phone or text size. */
 @Composable
-private fun ChamberCard(chamber: Chamber, order: Int, modifier: Modifier = Modifier) {
+private fun Countdown(ms: Long, ink: Color, modifier: Modifier = Modifier) {
+    val parts = countdown(ms).split(" ")
+    val days = parts.takeIf { it.size == 2 }?.first()?.removeSuffix("d")?.toIntOrNull()
+    val minutes = ms.coerceAtLeast(0) / 60_000
+    val spoken = "${minutes / 1440} days, ${minutes % 1440 / 60} hours, ${minutes % 60} minutes"
+    val digits = MaterialTheme.typography.displayMedium
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val steady = remember(density) { Density(density.density, 1f) }
+    BoxWithConstraints(modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }) {
+        val reference = remember(steady, digits) {
+            measurer.measure("00:00:00", digits.copy(fontSize = 100.sp), density = steady).size.width
+        }
+        val size = (98f * constraints.maxWidth / reference).coerceAtMost(112f)
+        CompositionLocalProvider(LocalDensity provides steady) {
+            Column {
+                if (days != null) {
+                    Text(
+                        if (days == 1) "1 day" else "$days days",
+                        style = MaterialTheme.typography.displaySmall.copy(fontSize = (size * 0.42f).sp, lineHeight = (size * 0.6f).sp),
+                        color = ink,
+                    )
+                }
+                RollingText(parts.last(), digits.copy(fontSize = size.sp, lineHeight = (size * 1.14f).sp, letterSpacing = 0.sp), ink)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChamberCard(chamber: Chamber, shape: Shape, order: Int, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val cc = LocalCourtColors.current
     val source = remember { MutableInteractionSource() }
@@ -389,7 +427,6 @@ private fun ChamberCard(chamber: Chamber, order: Int, modifier: Modifier = Modif
         modifier = modifier
             .bounceIn(order)
             .springPress(source)
-            .heightIn(min = 148.dp)
             .semantics { contentDescription = description }
             .then(
                 if (chamber.onClick != null) {
@@ -398,14 +435,18 @@ private fun ChamberCard(chamber: Chamber, order: Int, modifier: Modifier = Modif
                     Modifier
                 },
             ),
-        shape = MaterialTheme.shapes.large,
+        shape = shape,
         color = container,
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 ShuttleBadge(chamber.state, 52.dp)
                 Spacer(Modifier.weight(1f))
-                Text(chamber.status, style = MaterialTheme.typography.labelLargeEmphasized, color = ink, maxLines = 1)
+                if (chamber.state == ShuttleState.EMPTY) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, tint = colors.onSurfaceVariant)
+                } else {
+                    Text(chamber.status, style = MaterialTheme.typography.labelLargeEmphasized, color = ink, maxLines = 1)
+                }
             }
             Spacer(Modifier.height(10.dp))
             Text(chamber.day, style = MaterialTheme.typography.bodyMedium, color = ink, maxLines = 1)
@@ -423,37 +464,28 @@ private fun ChamberCard(chamber: Chamber, order: Int, modifier: Modifier = Modif
     }
 }
 
+/** Grouped by where each rule comes from, so its source needs no decoding. */
 @Composable
 private fun RulesSection() {
     val colors = MaterialTheme.colorScheme
+    val sources = RuleSource.entries
     Column {
         SectionLabel("Booking rules")
         Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
-            RULES.forEachIndexed { index, rule ->
-                Surface(shape = segmentShape(index, RULES.size), color = colors.surfaceBright) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            sources.forEachIndexed { index, source ->
+                Surface(shape = segmentShape(index, sources.size), color = colors.surfaceBright, modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Text(rule.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                        Surface(shape = CircleShape, color = colors.secondaryContainer) {
-                            Text(
-                                rule.source.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            )
+                        Text(source.label, style = MaterialTheme.typography.labelLargeEmphasized, color = colors.onSurfaceVariant)
+                        RULES.filter { it.source == source }.forEach { rule ->
+                            Text(rule.text, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
             }
         }
-        Text(
-            "Terms: Pusat Sukan’s rules. Page: UMPoint’s booking page. Seen: observed on the site. Note: this app’s own limit.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
-        )
     }
 }
 

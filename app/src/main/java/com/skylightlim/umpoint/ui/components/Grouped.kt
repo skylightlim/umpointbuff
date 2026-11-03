@@ -33,17 +33,17 @@ import androidx.compose.ui.unit.dp
 /** The gap between rows of one group. */
 val SegmentGap = 3.dp
 
+/** The corners on the outside of a group, and where its rows meet. */
+val SegmentOuter = 28.dp
+val SegmentInner = 6.dp
+
 /** Round on the outside of a group and nearly square where its rows meet. */
-fun segmentShape(index: Int, count: Int): Shape {
-    val outer = 28.dp
-    val inner = 6.dp
-    return RoundedCornerShape(
-        topStart = if (index == 0) outer else inner,
-        topEnd = if (index == 0) outer else inner,
-        bottomStart = if (index == count - 1) outer else inner,
-        bottomEnd = if (index == count - 1) outer else inner,
-    )
-}
+fun segmentShape(index: Int, count: Int): Shape = RoundedCornerShape(
+    topStart = if (index == 0) SegmentOuter else SegmentInner,
+    topEnd = if (index == 0) SegmentOuter else SegmentInner,
+    bottomStart = if (index == count - 1) SegmentOuter else SegmentInner,
+    bottomEnd = if (index == count - 1) SegmentOuter else SegmentInner,
+)
 
 /** The small coloured label above a group, with room for a quiet action at its end. */
 @Composable

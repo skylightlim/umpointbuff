@@ -5,12 +5,14 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -29,8 +31,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asComposePath
@@ -41,6 +49,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.graphics.shapes.toPath
@@ -88,6 +97,49 @@ fun Modifier.bounceIn(order: Int = 0): Modifier {
     }
 }
 
+private val TOP_FADE = 20.dp
+private val BOTTOM_FADE = 56.dp
+
+/**
+ * Scrolling content dissolves where it meets the chrome floating over it, instead of running under
+ * it with a hard edge. The top only fades once something has actually scrolled away behind it, and
+ * the bottom fades out over [bottom], the space the dock or main action needs.
+ */
+@Composable
+fun Modifier.fadingEdges(state: ScrollableState, bottom: Dp = LocalBottomClearance.current): Modifier {
+    val top by animateFloatAsState(
+        targetValue = if (state.canScrollBackward) 1f else 0f,
+        animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
+        label = "edge",
+    )
+    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val topFade = TOP_FADE.toPx()
+            if (top > 0f) {
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black.copy(alpha = 1f - top), 1f to Color.Black, endY = topFade),
+                    size = Size(size.width, topFade),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+            if (bottom > 0.dp) {
+                val start = size.height - bottom.toPx()
+                drawRect(
+                    Brush.verticalGradient(
+                        0f to Color.Black,
+                        1f to Color.Transparent,
+                        startY = start,
+                        endY = start + minOf(BOTTOM_FADE.toPx(), bottom.toPx()),
+                    ),
+                    topLeft = Offset(0f, start),
+                    size = Size(size.width, bottom.toPx()),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
+}
+
 /** A shape partway through a morph between two Material polygons. */
 private class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
@@ -129,19 +181,24 @@ fun MorphBadge(
     )
 }
 
-/** Text whose changing characters roll into place on a spring, for live numbers. */
+/**
+ * Text whose changing characters roll into place on a spring, for live numbers. A digit changes every
+ * second and can be very large, so it settles with a small overshoot rather than the usual big one.
+ */
 @Composable
 fun RollingText(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
     val motion = MaterialTheme.motionScheme
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+    // Clipped to its line like an odometer, so a digit never flies over what's above or below it.
+    Row(modifier.clipToBounds(), verticalAlignment = Alignment.CenterVertically) {
         text.forEachIndexed { index, char ->
             androidx.compose.runtime.key(text.length - index) {
                 AnimatedContent(
                     targetState = char,
                     transitionSpec = {
-                        (slideInVertically(motion.fastSpatialSpec<IntOffset>()) { it } + fadeIn(motion.fastEffectsSpec()))
-                            .togetherWith(slideOutVertically(motion.fastSpatialSpec<IntOffset>()) { -it } + fadeOut(motion.fastEffectsSpec()))
-                            .using(SizeTransform(clip = true) { _, _ -> motion.fastSpatialSpec<IntSize>() })
+                        val roll = spring<IntOffset>(dampingRatio = 0.68f, stiffness = 900f)
+                        (slideInVertically(roll) { it } + fadeIn(motion.fastEffectsSpec()))
+                            .togetherWith(slideOutVertically(roll) { -it } + fadeOut(motion.fastEffectsSpec()))
+                            .using(SizeTransform(clip = true) { _, _ -> spring<IntSize>(dampingRatio = 1f, stiffness = 900f) })
                     },
                     label = "digit",
                 ) { current ->

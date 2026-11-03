@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.AlertDialog
@@ -32,10 +33,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -57,9 +60,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skylightlim.umpoint.AppViewModel
 import com.skylightlim.umpoint.BuildConfig
 import com.skylightlim.umpoint.data.SessionState
+import com.skylightlim.umpoint.ui.components.IconTile
 import com.skylightlim.umpoint.ui.components.SectionLabel
 import com.skylightlim.umpoint.ui.components.SegmentGap
 import com.skylightlim.umpoint.ui.components.SegmentRow
+import com.skylightlim.umpoint.ui.components.fadingEdges
 import com.skylightlim.umpoint.ui.components.segmentShape
 
 @Composable
@@ -78,17 +83,19 @@ fun SettingsScreen(vm: AppViewModel, session: SessionState, onBack: () -> Unit, 
             TopAppBar(
                 title = { Text("Settings", style = MaterialTheme.typography.headlineMedium) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, shapes = IconButtonDefaults.shapes()) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surfaceContainer),
             )
 
+            val scroll = rememberScrollState()
             Column(
                 Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .fadingEdges(scroll, bottom = 0.dp)
+                    .verticalScroll(scroll)
                     .padding(horizontal = 16.dp)
                     .navigationBarsPadding()
                     .padding(top = 8.dp, bottom = 32.dp),
@@ -104,11 +111,16 @@ fun SettingsScreen(vm: AppViewModel, session: SessionState, onBack: () -> Unit, 
                             SessionState.OFFLINE -> "Can’t reach UMPoint"
                             SessionState.UNKNOWN -> "Checking…"
                         },
-                        subtitle = "Renews by itself.",
+                        subtitle = when (session) {
+                            SessionState.SIGNED_IN -> "Renews by itself."
+                            SessionState.SIGNED_OUT -> "Sign in with your SiswaMail."
+                            SessionState.OFFLINE -> "It may be down, or check your connection."
+                            SessionState.UNKNOWN -> null
+                        },
                         icon = Icons.Rounded.AccountCircle,
                         trailing = {
-                            if (session == SessionState.SIGNED_IN) {
-                                Button(
+                            when (session) {
+                                SessionState.SIGNED_IN -> Button(
                                     onClick = { confirmSignOut = true },
                                     shapes = ButtonDefaults.shapes(),
                                     colors = ButtonDefaults.buttonColors(
@@ -116,8 +128,10 @@ fun SettingsScreen(vm: AppViewModel, session: SessionState, onBack: () -> Unit, 
                                         contentColor = colors.onErrorContainer,
                                     ),
                                 ) { Text("Sign out", maxLines = 1) }
-                            } else {
-                                Button(onClick = { vm.requestSignIn() }, shapes = ButtonDefaults.shapes()) {
+                                SessionState.OFFLINE -> Button(onClick = { vm.retrySession() }, shapes = ButtonDefaults.shapes()) {
+                                    Text("Retry", maxLines = 1)
+                                }
+                                else -> Button(onClick = { vm.requestSignIn() }, shapes = ButtonDefaults.shapes()) {
                                     Text("Sign in", maxLines = 1)
                                 }
                             }
@@ -129,18 +143,30 @@ fun SettingsScreen(vm: AppViewModel, session: SessionState, onBack: () -> Unit, 
                     SectionLabel("Booking defaults")
                     Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
                         Surface(shape = segmentShape(0, 2), color = colors.surfaceBright) {
-                            OutlinedTextField(
-                                value = event,
-                                onValueChange = {
-                                    event = it
-                                    vm.updatePrefs(prefs.copy(event = it.ifBlank { "Badminton practice" }))
-                                },
-                                label = { Text("Event name") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            )
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                IconTile(Icons.Rounded.Edit)
+                                TextField(
+                                    value = event,
+                                    onValueChange = {
+                                        event = it
+                                        vm.updatePrefs(prefs.copy(event = it.ifBlank { "Badminton practice" }))
+                                    },
+                                    label = { Text("Event name") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        unfocusedIndicatorColor = colors.outlineVariant,
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                         SegmentRow(
                             shape = segmentShape(1, 2),

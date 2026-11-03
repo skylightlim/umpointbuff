@@ -97,6 +97,9 @@ import kotlinx.coroutines.launch
 /** Room for the dock (76 dp tall) and the gaps around it, above the system navigation bar. */
 private val DOCK_CLEARANCE = 112.dp
 
+/** Lifts snackbars off the dock or the main action, which are the same height. */
+private val SNACKBAR_LIFT = 84.dp
+
 private enum class Tab(val label: String) {
     COURTS("Courts"),
     SNIPER("Sniper"),
@@ -184,16 +187,7 @@ fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
     val scope = rememberCoroutineScope()
     val backProgress = remember { Animatable(0f) }
     val backSpring = motion.defaultSpatialSpec<Float>()
-    LaunchedEffect(settingsOpen, togetherOpen) { backProgress.snapTo(0f) }
-    PredictiveBackHandler(enabled = settingsOpen || togetherOpen) { events ->
-        try {
-            events.collect { backProgress.snapTo(it.progress) }
-            if (togetherOpen) together.setOpen(false) else settingsOpen = false
-        } catch (e: CancellationException) {
-            scope.launch { backProgress.animateTo(0f, backSpring) }
-            throw e
-        }
-    }
+    LaunchedEffect(settingsOpen, togetherOpen) { if (settingsOpen || togetherOpen) backProgress.snapTo(0f) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
@@ -203,7 +197,7 @@ fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             snackbarHost = {
-                SnackbarHost(snackbar) { data ->
+                SnackbarHost(snackbar, Modifier.padding(bottom = bottomInset + if (wide) 0.dp else SNACKBAR_LIFT)) { data ->
                     val colors = MaterialTheme.colorScheme
                     val cc = LocalCourtColors.current
                     val (container, content) = when (snackTone) {
@@ -298,6 +292,16 @@ fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
             enter = slideInVertically(pageSpring<IntOffset>()) { it / 6 } + fadeIn(motion.fastEffectsSpec()),
             exit = slideOutVertically(pageSpring<IntOffset>()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
         ) {
+            // The newest back handler wins. Living here, it comes after the court step's underneath.
+            PredictiveBackHandler(enabled = settingsOpen) { events ->
+                try {
+                    events.collect { backProgress.snapTo(it.progress) }
+                    settingsOpen = false
+                } catch (e: CancellationException) {
+                    scope.launch { backProgress.animateTo(0f, backSpring) }
+                    throw e
+                }
+            }
             SettingsScreen(
                 vm = vm,
                 session = session,
@@ -319,6 +323,15 @@ fun AppRoot(vm: AppViewModel, together: TogetherViewModel) {
             enter = slideInVertically(pageSpring<IntOffset>()) { it / 6 } + fadeIn(motion.fastEffectsSpec()),
             exit = slideOutVertically(pageSpring<IntOffset>()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
         ) {
+            PredictiveBackHandler(enabled = togetherOpen) { events ->
+                try {
+                    events.collect { backProgress.snapTo(it.progress) }
+                    together.setOpen(false)
+                } catch (e: CancellationException) {
+                    scope.launch { backProgress.animateTo(0f, backSpring) }
+                    throw e
+                }
+            }
             TogetherScreen(
                 vm = together,
                 app = vm,

@@ -27,13 +27,14 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -50,10 +51,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -71,7 +75,7 @@ class TogetherEntry(val waiting: Int, val onClick: () -> Unit)
 
 val LocalTogetherEntry = compositionLocalOf<TogetherEntry?> { null }
 
-/** A top-level screen: a flexible app bar that collapses as the content scrolls, and the avatar. */
+/** A top-level screen: its title and the avatar on one row, with the content filling the rest. */
 @Composable
 fun ScreenFrame(
     title: String,
@@ -79,19 +83,14 @@ fun ScreenFrame(
     onAccount: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    Column(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection)) {
-        MediumFlexibleTopAppBar(
-            title = { Text(title) },
+    Column(Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text(title, style = MaterialTheme.typography.headlineMedium) },
             actions = {
                 LocalTogetherEntry.current?.let { TogetherButton(it) }
                 AccountButton(session, onAccount)
             },
-            scrollBehavior = scroll,
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         )
         content()
     }
@@ -171,7 +170,7 @@ fun Note(
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium, color = content, modifier = Modifier.weight(1f))
             if (actionLabel != null && onAction != null) {
-                FilledTonalButton(onClick = onAction) { Text(actionLabel, maxLines = 1) }
+                FilledTonalButton(onClick = onAction, shapes = ButtonDefaults.shapes()) { Text(actionLabel, maxLines = 1) }
             }
         }
     }
@@ -328,27 +327,48 @@ fun ShuttleState.polygon(): RoundedPolygon = when (this) {
     ShuttleState.TEST -> MaterialShapes.Pill
 }
 
-/** The app's mark: a drawn shuttlecock, dashed while its slot is still empty. */
+/** The shuttlecock on a 24-unit grid, the same artwork as the launcher icon. */
+private val SHUTTLE by lazy {
+    PathParser().parsePathString(
+        "M6.53,11.13L2.90,4.20Q4.48,1.47 6.06,3.14L8.38,10.70Z" +
+            "M8.80,10.70L6.66,3.14Q8.24,0.62 9.82,2.49L10.65,10.43Z" +
+            "M11.07,10.43L10.42,2.49Q12.00,0.29 13.58,2.49L12.93,10.43Z" +
+            "M13.35,10.43L14.18,2.49Q15.76,0.62 17.34,3.14L15.20,10.70Z" +
+            "M15.62,10.70L17.94,3.14Q19.52,1.47 21.10,4.20L17.47,11.13Z" +
+            "M8.90,15.95L7.01,12.42Q12,11.42 16.99,12.42L15.10,15.95Z" +
+            "M8.5,18.2A3.5,3.5 0 0 0 15.5,18.2L15.5,17.9Q15.5,16.8 14.4,16.8L9.6,16.8Q8.5,16.8 8.5,17.9Z",
+    ).toPath()
+}
+
+/** Its outline, dashed while the slot is still empty. */
+private val SHUTTLE_OUTLINE by lazy {
+    PathParser().parsePathString(
+        "M8.90,15.95L2.60,4.20Q12,-1.80 21.40,4.20L15.10,15.95Z" +
+            "M8.5,18.2A3.5,3.5 0 0 0 15.5,18.2L15.5,17.9Q15.5,16.8 14.4,16.8L9.6,16.8Q8.5,16.8 8.5,17.9Z",
+    ).toPath()
+}
+
+/** The app's mark: a shuttlecock, drawn in dashes while its slot is still empty. */
 @Composable
 fun ShuttleGlyph(state: ShuttleState, ink: Color, size: Dp, modifier: Modifier = Modifier) {
     Canvas(modifier.size(size)) {
-        val w = this.size.width
-        val h = this.size.height
-        val cork = Offset(w / 2f, h * 0.68f)
-        if (state == ShuttleState.EMPTY) {
-            val dash = PathEffect.dashPathEffect(floatArrayOf(w * 0.09f, w * 0.07f))
-            val line = w * 0.05f
-            drawCircle(ink, radius = w * 0.16f, center = Offset(w / 2f, h * 0.82f), style = Stroke(width = line, pathEffect = dash))
-            drawLine(ink, cork, Offset(w / 2f, h * 0.04f), strokeWidth = line, cap = StrokeCap.Round, pathEffect = dash)
-            drawLine(ink, cork, Offset(w * 0.18f, h * 0.14f), strokeWidth = line, cap = StrokeCap.Round, pathEffect = dash)
-            drawLine(ink, cork, Offset(w * 0.82f, h * 0.14f), strokeWidth = line, cap = StrokeCap.Round, pathEffect = dash)
-            drawLine(ink, Offset(w * 0.3f, h * 0.6f), Offset(w * 0.7f, h * 0.6f), strokeWidth = line, cap = StrokeCap.Round, pathEffect = dash)
-        } else {
-            drawCircle(ink, radius = w * 0.16f, center = Offset(w / 2f, h * 0.82f))
-            drawLine(ink, cork, Offset(w / 2f, h * 0.04f), strokeWidth = w * 0.09f, cap = StrokeCap.Round)
-            drawLine(ink, cork, Offset(w * 0.18f, h * 0.14f), strokeWidth = w * 0.07f, cap = StrokeCap.Round)
-            drawLine(ink, cork, Offset(w * 0.82f, h * 0.14f), strokeWidth = w * 0.07f, cap = StrokeCap.Round)
-            drawLine(ink, Offset(w * 0.3f, h * 0.6f), Offset(w * 0.7f, h * 0.6f), strokeWidth = w * 0.06f, cap = StrokeCap.Round)
+        scale(this.size.width / 24f, pivot = Offset.Zero) {
+            translate(top = 0.8f) {
+                if (state == ShuttleState.EMPTY) {
+                    drawPath(
+                        SHUTTLE_OUTLINE,
+                        ink,
+                        style = Stroke(
+                            width = 1.2f,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(1.8f, 1.6f)),
+                        ),
+                    )
+                } else {
+                    drawPath(SHUTTLE, ink)
+                }
+            }
         }
     }
 }
@@ -372,7 +392,7 @@ fun shuttleColors(state: ShuttleState): Pair<Color, Color> {
 fun ShuttleBadge(state: ShuttleState, size: Dp, modifier: Modifier = Modifier) {
     val (fill, ink) = shuttleColors(state)
     MorphBadge(state.polygon(), fill, size, modifier) {
-        ShuttleGlyph(state, ink, size * 0.56f)
+        ShuttleGlyph(state, ink, size * 0.62f)
     }
 }
 

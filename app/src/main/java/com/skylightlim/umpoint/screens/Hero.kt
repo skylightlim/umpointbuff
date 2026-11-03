@@ -93,7 +93,7 @@ fun ArmedHero(task: Task, onDone: () -> Unit) {
                     scaleY = grow.value
                 },
             ) {
-                ShuttleGlyph(ShuttleState.ARMED, cc.onArmed, 112.dp)
+                ShuttleGlyph(ShuttleState.ARMED, cc.onArmed, 136.dp)
             }
             Surface(shape = MaterialTheme.shapes.extraLarge, color = cc.armedContainer) {
                 Column(
@@ -199,6 +199,8 @@ fun ResultHero(task: Task, onDone: () -> Unit) {
             Button(
                 onClick = onDone,
                 shapes = ButtonDefaults.shapes(),
+                // The page's own colours turned inside out, so nothing from the wallpaper clashes with it.
+                colors = ButtonDefaults.buttonColors(containerColor = content, contentColor = container),
                 modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MediumContainerHeight),
             ) { Text("Done", style = MaterialTheme.typography.titleMedium) }
         }
