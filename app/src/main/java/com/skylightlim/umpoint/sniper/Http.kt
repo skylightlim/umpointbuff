@@ -177,6 +177,8 @@ class UmpointHttp(private val ctx: Context) {
       throw IllegalStateException("UMPoint is offline right now. Try again later.")
     }
     if (r.code == 404) throw SessionExpired()
+    // Seen 1–2 Nov 2026: every badminton court answered an empty 500 while the rest of the site worked.
+    if (r.code >= 500) throw IllegalStateException("UMPoint's courts are broken on its side (HTTP ${r.code}).")
     if (r.code != 200) throw IllegalStateException("UMPoint returned HTTP ${r.code}.")
     return Grid.parse(r.body)
   }

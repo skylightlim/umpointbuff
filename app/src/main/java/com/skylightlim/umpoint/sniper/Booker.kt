@@ -93,7 +93,8 @@ class Booker(private val ctx: Context, private val http: UmpointHttp, private va
           throw e
         } catch (e: Exception) {
           log("court $court #$n error: $e")
-          Outcome(Kind.NOT_OPEN, "Couldn't reach UMPoint (${e.javaClass.simpleName})")
+          // Our own IllegalStateExceptions already say what went wrong; only network errors mean "unreachable".
+          Outcome(Kind.NOT_OPEN, (e as? IllegalStateException)?.message ?: "Couldn't reach UMPoint (${e.javaClass.simpleName})")
         }
         if (o.kind == Kind.BOOKED) return Result("booked", "Booked Court $court · ${label(task)}", court)
         why = o.why
